@@ -11,14 +11,26 @@ Each function returns a tidy long-format DataFrame with consistent columns:
 
 Usage:
     from etl.extract import extract_wgi, extract_imf, extract_hdi, extract_polity5
+    from etl.extract import extract_vdem, extract_wb_api
 """
 
 from __future__ import annotations
 
-import os
+import ssl
+import warnings
 from pathlib import Path
 
 import pandas as pd
+import requests
+
+warnings.filterwarnings("ignore")
+
+# ---------------------------------------------------------------------------
+# Shared HTTP session — replicates SSL bypass from existing project
+# (macOS ships without root certs accessible to Python by default)
+# ---------------------------------------------------------------------------
+_session = requests.Session()
+_session.verify = False
 
 DATASET_DIR = Path(__file__).resolve().parents[1] / "Dataset"
 
@@ -218,14 +230,160 @@ def extract_polity5() -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# V-Dem — Varieties of Democracy core indices (CSV, long format)
+# ---------------------------------------------------------------------------
+
+_VDEM_COL_MAP = {
+    "Code":                           "country_code",
+    "Entity":                         "country_name",
+    "Year":                           "year",
+    "Electoral_Democracy_Index":      "electoral_democracy_index",
+    "Liberal_Democracy_Index":        "liberal_democracy_index",
+    "Participatory_Democracy_Index":  "participatory_democracy_index",
+}
+
+
+def extract_vdem() -> pd.DataFrame:
+    """
+    Read VDem_Core_Indices.csv and return long-format DataFrame.
+
+    Source format: long, one row per (country, year). Three democracy indices,
+    all scored 0–1. Copied from Economic_Political_Indicators project.
+    """
+    path = DATASET_DIR / "VDem_Core_Indices.csv"
+    raw = pd.read_csv(path)
+
+    df = raw[list(_VDEM_COL_MAP.keys())].copy()
+    df = df.rename(columns=_VDEM_COL_MAP)
+
+    indicator_cols = [
+        "electoral_democracy_index",
+        "liberal_democracy_index",
+        "participatory_democracy_index",
+    ]
+    for col in indicator_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df_long = df.melt(
+        id_vars=["country_code", "country_name", "year"],
+        value_vars=indicator_cols,
+        var_name="indicator",
+        value_name="value",
+    )
+    df_long["source"] = "V-Dem"
+    df_long = df_long.dropna(subset=["value"])
+    return df_long[["country_code", "country_name", "indicator", "year", "value", "source"]]
+
+
+# ---------------------------------------------------------------------------
+# World Bank API — fetch fresh WGI + economic indicators via WDI REST API
+# ---------------------------------------------------------------------------
+
+# Governance indicators (WGI) + economic indicators available through WDI
+_WB_API_INDICATORS = {
+    # WGI — governance
+    "CC.EST": "control_of_corruption",
+    "GE.EST": "government_effectiveness",
+    "PV.EST": "political_stability",
+    "RQ.EST": "regulatory_quality",
+    "RL.EST": "rule_of_law",
+    "VA.EST": "voice_and_accountability",
+    # Economic
+    "NY.GDP.MKTP.KD.ZG": "gdp_growth_pct",
+    "NY.GDP.PCAP.CD":     "gdp_per_capita_usd",
+    "FP.CPI.TOTL.ZG":    "inflation_cpi_pct",
+    "SL.UEM.TOTL.ZS":    "unemployment_pct",
+    "GC.DOD.TOTL.GD.ZS": "public_debt_pct_gdp",
+    "NE.TRD.GNFS.ZS":    "trade_pct_gdp",
+}
+
+_WB_API_BASE = "https://api.worldbank.org/v2/country/all/indicator"
+_WB_API_PARAMS = "format=json&per_page=20000&mrv=30"   # mrv=30 → most recent 30 years
+
+
+def extract_wb_api(indicators: dict[str, str] | None = None) -> pd.DataFrame:
+    """
+    Fetch fresh data from the World Bank WDI REST API.
+
+    Hits one endpoint per indicator, combines into a single long-format DataFrame.
+    Uses the same SSL bypass as the existing Unemployment_Economic_Indicators project.
+
+    Args:
+        indicators: optional override dict {wb_code: indicator_label}.
+                    Defaults to _WB_API_INDICATORS (WGI + economic set).
+
+    Returns:
+        Long-format DataFrame with columns:
+        country_code, country_name, indicator, year, value, source
+    """
+    if indicators is None:
+        indicators = _WB_API_INDICATORS
+
+    frames: list[pd.DataFrame] = []
+
+    for wb_code, label in indicators.items():
+        url = f"{_WB_API_BASE}/{wb_code}?{_WB_API_PARAMS}"
+        try:
+            resp = _session.get(url, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+
+            if len(data) < 2 or not data[1]:
+                print(f"  [skip] {label}: no data returned")
+                continue
+
+            rows = [
+                {
+                    "country_name": d["country"]["value"],
+                    "country_code": d["countryiso3code"],
+                    "year":         int(d["date"]) if d["date"] else None,
+                    "value":        float(d["value"]) if d["value"] is not None else None,
+                    "indicator":    label,
+                    "source":       "World Bank API",
+                }
+                for d in data[1]
+                # Filter to real countries only (ISO-3 codes are exactly 3 uppercase letters)
+                if d.get("countryiso3code") and len(d["countryiso3code"]) == 3
+            ]
+
+            df = pd.DataFrame(rows)
+            df = df.dropna(subset=["year", "value"])
+            df["year"] = df["year"].astype(int)
+            frames.append(df)
+            print(f"  [ok] {label}: {len(df):,} rows")
+
+        except requests.RequestException as exc:
+            print(f"  [error] {label}: {exc}")
+
+    if not frames:
+        print("  No data fetched from World Bank API.")
+        return pd.DataFrame(
+            columns=["country_code", "country_name", "indicator", "year", "value", "source"]
+        )
+
+    result = pd.concat(frames, ignore_index=True)
+    return result[["country_code", "country_name", "indicator", "year", "value", "source"]]
+
+
+# ---------------------------------------------------------------------------
 # Convenience: load everything at once
 # ---------------------------------------------------------------------------
 
-def extract_all() -> dict[str, pd.DataFrame]:
-    """Return a dict of all source DataFrames keyed by source name."""
-    return {
+def extract_all(include_api: bool = False) -> dict[str, pd.DataFrame]:
+    """
+    Return a dict of all source DataFrames keyed by source name.
+
+    Args:
+        include_api: if True, also calls extract_wb_api() (makes live HTTP requests).
+                     Default False so offline/test runs don't hit the network.
+    """
+    result = {
         "wgi":     extract_wgi(),
         "imf":     extract_imf(),
         "hdi":     extract_hdi(),
         "polity5": extract_polity5(),
+        "vdem":    extract_vdem(),
     }
+    if include_api:
+        result["wb_api"] = extract_wb_api()
+    return result
