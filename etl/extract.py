@@ -85,6 +85,7 @@ def extract_wgi() -> pd.DataFrame:
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     df["source"] = "World Bank WGI"
     df = df.dropna(subset=["value"])
+    print(f"WGI: {len(df):,} rows")
     return df[["country_code", "country_name", "indicator", "year", "value", "source"]]
 
 
@@ -127,6 +128,7 @@ def extract_imf() -> pd.DataFrame:
     df["source"] = "IMF WEO 2024"
     df["country_name"] = ""   # IMF file has no name column; join via countries table later
     df = df.dropna(subset=["value"])
+    print(f"IMF: {len(df):,} rows")
     return df[["country_code", "country_name", "indicator", "year", "value", "source"]]
 
 
@@ -179,6 +181,7 @@ def extract_hdi() -> pd.DataFrame:
     df_long["country_code"] = ""   # HDI file has no ISO code; fill via fuzzy join if needed
     df_long["source"] = "UNDP HDI 2023-24"
     df_long = df_long.dropna(subset=["value"])
+    print(f"HDI: {len(df_long):,} rows")
     return df_long[["country_code", "country_name", "indicator", "year", "value", "source"]]
 
 
@@ -226,6 +229,7 @@ def extract_polity5() -> pd.DataFrame:
     )
     df_long["source"] = "Polity5"
     df_long = df_long.dropna(subset=["value"])
+    print(f"Polity5: {len(df_long):,} rows")
     return df_long[["country_code", "country_name", "indicator", "year", "value", "source"]]
 
 
@@ -272,6 +276,7 @@ def extract_vdem() -> pd.DataFrame:
     )
     df_long["source"] = "V-Dem"
     df_long = df_long.dropna(subset=["value"])
+    print(f"V-Dem: {len(df_long):,} rows")
     return df_long[["country_code", "country_name", "indicator", "year", "value", "source"]]
 
 
@@ -386,4 +391,6 @@ def extract_all(include_api: bool = False) -> dict[str, pd.DataFrame]:
     }
     if include_api:
         result["wb_api"] = extract_wb_api()
+    total = sum(len(df) for df in result.values())
+    print(f"Total: {total:,} rows across {len(result)} sources")
     return result
