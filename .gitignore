@@ -1,7 +1,30 @@
+# Secrets
 .env
+
+# Python
 __pycache__/
 *.pyc
-.DS_Store
+*.pyo
 *.egg-info/
 .venv/
-data/raw/
+.pytest_cache/
+.mypy_cache/
+
+# macOS
+.DS_Store
+
+# Generated outputs — do not commit large data files or binaries
+data/
+logs/
+*.log
+
+# Personal working docs
+Document/
+
+# Power BI binaries
+*.pbix
+
+# Spark local temp
+derby.log
+metastore_db/
+spark-warehouse/
