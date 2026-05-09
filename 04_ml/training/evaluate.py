@@ -63,6 +63,9 @@ def evaluate_all(preds_df: pd.DataFrame, actuals_df: pd.DataFrame) -> pd.DataFra
     """
     records = []
 
+    if preds_df.empty or "model_name" not in preds_df.columns:
+        return pd.DataFrame(columns=["model_name", "indicator", "mae", "rmse", "mape", "r2", "n_series"])
+
     for (model_name, indicator), group in preds_df.groupby(["model_name", "indicator"]):
         actual_ind = actuals_df[actuals_df["indicator"] == indicator]
         merged = group.merge(
@@ -83,7 +86,7 @@ def evaluate_all(preds_df: pd.DataFrame, actuals_df: pd.DataFrame) -> pd.DataFra
         records.append(metrics)
 
     if not records:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=["model_name", "indicator", "mae", "rmse", "mape", "r2", "n_series"])
 
     cols = ["model_name", "indicator", "mae", "rmse", "mape", "r2", "n_series"]
     return pd.DataFrame(records)[cols].sort_values(["model_name", "indicator"])
