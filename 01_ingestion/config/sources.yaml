@@ -1,0 +1,62 @@
+kafka:
+  bootstrap_servers: "localhost:9092"
+  topics:
+    wgi:     "raw.wgi"
+    imf:     "raw.imf"
+    hdi:     "raw.hdi"
+    polity5: "raw.polity5"
+    vdem:    "raw.vdem"
+    wb_api:  "raw.wb_api"
+  producer:
+    acks: "all"
+    retries: 3
+    batch_size: 16384
+    linger_ms: 5
+
+sources:
+  wgi:
+    type: file
+    path: "Dataset"
+    files:
+      - WGI_Control_of_Corruption.csv
+      - WGI_Government_Effectiveness.csv
+      - WGI_Political_Stability.csv
+      - WGI_Regulatory_Quality.csv
+      - WGI_Rule_of_Law.csv
+      - WGI_Voice_Accountability.csv
+    schedule: "0 2 * * 1"   # every Monday 02:00
+
+  imf:
+    type: file
+    path: "Dataset/IMF_WEO_2024.csv"
+    schedule: "0 2 * * 1"
+
+  hdi:
+    type: file
+    path: "Dataset/UNDP_HDI_2023-24.csv"
+    schedule: "0 2 * * 1"
+
+  polity5:
+    type: file
+    path: "Dataset/Polity5.csv"
+    schedule: "0 2 * * 1"
+
+  vdem:
+    type: file
+    path: "Dataset/VDem_Core_Indices.csv"
+    schedule: "0 2 * * 1"
+
+  wb_api:
+    type: rest_api
+    base_url: "https://api.worldbank.org/v2/country/all/indicator"
+    params:
+      format: json
+      per_page: 20000
+      mrv: 30
+    indicators:
+      CC.EST:              control_of_corruption
+      GE.EST:              government_effectiveness
+      NY.GDP.MKTP.KD.ZG:   gdp_growth_pct
+      FP.CPI.TOTL.ZG:      inflation_cpi_pct
+      SL.UEM.TOTL.ZS:      unemployment_pct
+    schedule: "0 3 1 * *"   # first day of each month 03:00

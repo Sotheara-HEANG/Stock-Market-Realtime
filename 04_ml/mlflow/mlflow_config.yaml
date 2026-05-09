@@ -1,0 +1,35 @@
+mlflow:
+  tracking_uri: "http://localhost:5001"   # MLflow server (docker-compose service)
+  experiment_name: "econ-governance-forecasting"
+  artifact_location: "mlflow-artifacts"
+
+  # Tags applied to every run
+  default_tags:
+    project: "econ-governance-pipeline"
+    team: "data-engineering"
+
+models:
+  linear_trend:
+    description: "OLS trend extrapolation with 95% prediction intervals"
+    params:
+      horizon: 3
+      confidence_level: 0.95
+
+  holt_smoothing:
+    description: "Holt double exponential smoothing with damped trend"
+    params:
+      horizon: 3
+      trend: "add"
+      damped_trend: true
+      optimized: true
+
+indicators:
+  - gdp_growth_pct
+  - inflation_pct
+  - unemployment_pct
+  - governance_composite
+  - hdi_value
+
+training:
+  min_observations: 10
+  test_years: 3          # last N years held out for evaluation

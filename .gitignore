@@ -28,3 +28,14 @@ Document/
 derby.log
 metastore_db/
 spark-warehouse/
+
+# Docker
+.dockerignore
+
+# IDE / session files
+.Rhistory
+.claude/
+
+# MLflow local artifacts
+mlruns/
+04_ml/models/*.csv

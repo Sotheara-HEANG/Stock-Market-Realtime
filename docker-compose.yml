@@ -1,0 +1,157 @@
+services:
+
+  # ── Zookeeper (required by Kafka) ─────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: econ_zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Kafka Broker ──────────────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: econ_kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ── PostgreSQL ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: econ_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       econ_pipeline
+      POSTGRES_USER:     kongsattha
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./03_warehouse/bronze/schema.sql:/docker-entrypoint-initdb.d/02_bronze.sql
+      - ./03_warehouse/silver/schema.sql:/docker-entrypoint-initdb.d/03_silver.sql
+      - ./03_warehouse/gold/schema.sql:/docker-entrypoint-initdb.d/04_gold_schema.sql
+      - ./03_warehouse/gold/dim_time.sql:/docker-entrypoint-initdb.d/05_dim_time.sql
+      - ./03_warehouse/gold/dim_country.sql:/docker-entrypoint-initdb.d/06_dim_country.sql
+      - ./03_warehouse/gold/dim_indicator.sql:/docker-entrypoint-initdb.d/07_dim_indicator.sql
+      - ./03_warehouse/gold/fact_indicators.sql:/docker-entrypoint-initdb.d/08_fact_indicators.sql
+      - ./03_warehouse/gold/fact_predictions.sql:/docker-entrypoint-initdb.d/09_fact_predictions.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kongsattha -d econ_pipeline"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MLflow Tracking Server ────────────────────────────────────────────────
+  mlflow:
+    image: python:3.11-slim
+    container_name: econ_mlflow
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      bash -c "pip install mlflow psycopg2-binary --quiet &&
+               mlflow server
+                 --backend-store-uri postgresql+psycopg2://kongsattha:${DB_PASSWORD:-}@postgres:5432/econ_pipeline
+                 --default-artifact-root /mlflow-artifacts
+                 --host 0.0.0.0
+                 --port 5001"
+    volumes:
+      - mlflow_artifacts:/mlflow-artifacts
+    ports:
+      - "5001:5001"
+
+  # ── ETL Pipeline (one-shot) ───────────────────────────────────────────────
+  pipeline:
+    build: .
+    container_name: econ_pipeline
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      DB_HOST:                 postgres
+      DB_PORT:                 5432
+      DB_NAME:                 econ_pipeline
+      DB_USER:                 kongsattha
+      DB_PASSWORD:             ${DB_PASSWORD:-}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    volumes:
+      - ./data:/app/data
+      - ./Dataset:/app/Dataset
+      - ./logs:/app/logs
+    profiles: ["run"]
+
+  # ── FastAPI Backend ───────────────────────────────────────────────────────
+  api:
+    build: .
+    container_name: econ_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: uvicorn 05_app.api.app:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      DB_HOST:     postgres
+      DB_PORT:     5432
+      DB_NAME:     econ_pipeline
+      DB_USER:     kongsattha
+      DB_PASSWORD: ${DB_PASSWORD:-}
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    profiles: ["app"]
+
+  # ── Streamlit Dashboard ───────────────────────────────────────────────────
+  dashboard:
+    build: .
+    container_name: econ_dashboard
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: streamlit run 05_app/dashboard/dashboard.py --server.port 8501 --server.address 0.0.0.0
+    environment:
+      DB_HOST:     postgres
+      DB_PORT:     5432
+      DB_NAME:     econ_pipeline
+      DB_USER:     kongsattha
+      DB_PASSWORD: ${DB_PASSWORD:-}
+    volumes:
+      - .:/app
+    ports:
+      - "8501:8501"
+    profiles: ["app"]
+
+volumes:
+  postgres_data:
+  mlflow_artifacts:
