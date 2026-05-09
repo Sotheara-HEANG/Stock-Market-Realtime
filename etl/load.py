@@ -21,7 +21,8 @@ from pathlib import Path
 import pandas as pd
 from dotenv import load_dotenv
 from pyspark.sql import DataFrame
-from sqlalchemy import create_engine, text, exc
+from sqlalchemy import create_engine, text, exc, Float
+from sqlalchemy.dialects.oracle import FLOAT as OracleFloat
 
 _ENV_PATH = Path(__file__).parent.parent / ".env"
 
@@ -181,13 +182,28 @@ def _build_indicators(pdf: pd.DataFrame, countries: pd.DataFrame) -> pd.DataFram
 # ---------------------------------------------------------------------------
 
 
+def _oracle_float_dtypes(df: pd.DataFrame) -> dict:
+    """
+    Return a dtype mapping for float64 columns using Oracle's FLOAT(binary_precision=126).
+    Without this, SQLAlchemy raises an error about decimal vs binary precision mismatch.
+    binary_precision=126 is the Oracle equivalent of IEEE 754 double (float64).
+    """
+    return {
+        col: Float().with_variant(OracleFloat(binary_precision=126), "oracle")
+        for col in df.select_dtypes(include=["float64", "float32"]).columns
+    }
+
+
 def _write_tables(engine, countries: pd.DataFrame, indicators: pd.DataFrame, label: str, chunksize: int, is_oracle: bool = False) -> None:
     """Write countries and indicators to the given engine."""
+    ora_dtype_c = _oracle_float_dtypes(countries)  if is_oracle else None
+    ora_dtype_i = _oracle_float_dtypes(indicators) if is_oracle else None
+
     print(f"  Writing countries → {label}...")
     if is_oracle:
         with engine.begin() as conn:
             _drop_oracle_tables(conn)
-        countries.to_sql("countries", engine, if_exists="replace", index=False, chunksize=chunksize)
+        countries.to_sql("countries", engine, if_exists="replace", index=False, chunksize=chunksize, dtype=ora_dtype_c)
     else:
         with engine.begin() as conn:
             conn.execute(text("DROP TABLE IF EXISTS predictions CASCADE"))
@@ -197,7 +213,7 @@ def _write_tables(engine, countries: pd.DataFrame, indicators: pd.DataFrame, lab
     print(f"        {len(countries):,} rows written")
 
     print(f"  Writing indicators → {label}...")
-    indicators.to_sql("indicators", engine, if_exists="replace", index=False, chunksize=chunksize)
+    indicators.to_sql("indicators", engine, if_exists="replace", index=False, chunksize=chunksize, dtype=ora_dtype_i)
     print(f"        {len(indicators):,} rows written")
 
     engine.dispose()

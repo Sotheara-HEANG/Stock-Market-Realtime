@@ -88,6 +88,25 @@ services:
     ports:
       - "5001:5001"
 
+  # ── Oracle Database (Free Edition) ───────────────────────────────────────
+  oracle:
+    image: container-registry.oracle.com/database/free:latest-lite
+    container_name: econ_oracle
+    restart: unless-stopped
+    environment:
+      ORACLE_PWD: ${ORA_PASSWORD:-YourPassword123}
+      ORACLE_CHARACTERSET: AL32UTF8
+    ports:
+      - "1521:1521"
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
   # ── ETL Pipeline (one-shot) ───────────────────────────────────────────────
   pipeline:
     build: .
@@ -155,3 +174,4 @@ services:
 volumes:
   postgres_data:
   mlflow_artifacts:
+  oracle_data:
