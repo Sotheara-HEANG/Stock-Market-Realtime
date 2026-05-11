@@ -1,17 +1,21 @@
 """
-main.py — run the economic-governance pipeline end to end.
+main.py — run the real-time finance pipeline end to end.
 
     Extract → Transform → Enrich → Load → Predict
 
 Usage:
-    python main.py
-    python main.py --api        # also fetch live World Bank data
-    python main.py --no-predict # skip the prediction step
+    python main.py                # real-time finance data (default)
+    python main.py --legacy       # also load static CSV files (WGI, IMF, HDI, etc.)
+    python main.py --api          # also fetch live World Bank data
+    python main.py --no-predict   # skip the prediction step
 """
 
 from __future__ import annotations
 
 import sys
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from etl.extract import extract_all
 from etl.transform import (
@@ -20,15 +24,16 @@ from etl.transform import (
     union_sources,
     normalize_country_names,
     pivot_wide,
-    drop_missing_gdp_hdi,
+    drop_missing_price,
 )
 from etl.enrich import enrich
 from etl.load import load
 from etl.predict import predict
 
 if __name__ == "__main__":
-    include_api  = "--api" in sys.argv
-    skip_predict = "--no-predict" in sys.argv
+    include_legacy   = "--legacy" in sys.argv
+    include_api      = "--api" in sys.argv
+    skip_predict     = "--no-predict" in sys.argv
     spark = get_spark()
 
     # ------------------------------------------------------------------
@@ -37,7 +42,11 @@ if __name__ == "__main__":
     print("=" * 50)
     print("Step 1/5 — Extract")
     print("=" * 50)
-    pdfs = extract_all(include_api=include_api)
+    pdfs = extract_all(
+        include_realtime=True,
+        include_legacy=include_legacy,
+        include_api=include_api,
+    )
 
     # ------------------------------------------------------------------
     # Step 2 — Transform

@@ -16,6 +16,7 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import ssl
 import warnings
 from pathlib import Path
@@ -371,26 +372,151 @@ def extract_wb_api(indicators: dict[str, str] | None = None) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# RapidAPI — Real-time Finance Data (stocks, commodities, forex)
+# ---------------------------------------------------------------------------
+
+_RAPIDAPI_BASE = "https://real-time-finance-data.p.rapidapi.com"
+_RAPIDAPI_HOST = "real-time-finance-data.p.rapidapi.com"
+
+
+def extract_realtime_finance(symbols: list[str] | None = None) -> pd.DataFrame:
+    """
+    Fetch real-time financial data from RapidAPI real-time-finance-data endpoint.
+
+    Fetches price, change %, volume, and market cap for given symbols.
+    Supports stocks, commodities, forex (e.g., 'AAPL', 'BTC-USD', 'EURUSD').
+
+    Args:
+        symbols: list of ticker symbols (e.g., ['AAPL', 'GOOGL', 'BTC-USD']).
+                 Defaults to major indices and commodities if None.
+
+    Returns:
+        Long-format DataFrame with columns:
+        country_code, country_name, indicator, year, value, source
+    """
+    api_key = os.getenv("RAPIDAPI_KEY")
+    if not api_key:
+        print("  [skip] RapidAPI: RAPIDAPI_KEY not set in environment")
+        return pd.DataFrame(
+            columns=["country_code", "country_name", "indicator", "year", "value", "source"]
+        )
+
+    if symbols is None:
+        symbols = [
+            "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
+            "META", "TSLA", "JPM", "JNJ", "V",
+            "PG", "UNH", "HD", "MA", "DIS",
+            "NFLX", "ADBE", "CRM", "PYPL", "BAC",
+        ]
+
+    headers = {
+        "X-RapidAPI-Key": api_key,
+        "X-RapidAPI-Host": _RAPIDAPI_HOST,
+    }
+
+    frames: list[pd.DataFrame] = []
+    import datetime
+
+    current_year = datetime.datetime.now().year
+    current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    for symbol in symbols:
+        try:
+            url = f"{_RAPIDAPI_BASE}/stock-overview"
+            params = {"symbol": symbol, "language": "en"}
+            resp = _session.get(url, headers=headers, params=params, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+
+            if not data or data.get("status") != "OK" or not data.get("data"):
+                print(f"  [skip] RealTime: {symbol} — no data returned")
+                continue
+
+            asset_data = data["data"]
+            symbol_clean = asset_data.get("name", symbol)
+
+            # Map fields to extract → (key, indicator_label)
+            _fields = [
+                ("price",          "current_price_usd"),
+                ("open",           "open_price_usd"),
+                ("high",           "day_high_usd"),
+                ("low",            "day_low_usd"),
+                ("volume",         "trading_volume"),
+                ("previous_close", "previous_close_usd"),
+                ("change",         "price_change_usd"),
+                ("change_percent", "price_change_pct"),
+            ]
+
+            rows = []
+            for field, indicator_label in _fields:
+                val = asset_data.get(field)
+                if val is not None:
+                    rows.append({
+                        "country_code": "",
+                        "country_name": symbol_clean,
+                        "indicator": indicator_label,
+                        "year": current_year,
+                        "value": float(val),
+                        "source": "RapidAPI RealTime Finance",
+                    })
+
+            if rows:
+                df = pd.DataFrame(rows)
+                frames.append(df)
+                print(f"  [ok] RealTime: {symbol_clean} — {len(rows)} indicators")
+
+        except requests.RequestException as exc:
+            print(f"  [error] RealTime: {symbol} — {exc}")
+        except (ValueError, KeyError) as exc:
+            print(f"  [error] RealTime: {symbol} — parse error: {exc}")
+
+    if not frames:
+        print("  No data fetched from RapidAPI.")
+        return pd.DataFrame(
+            columns=["country_code", "country_name", "indicator", "year", "value", "source"]
+        )
+
+    result = pd.concat(frames, ignore_index=True)
+    return result[["country_code", "country_name", "indicator", "year", "value", "source"]]
+
+
+# ---------------------------------------------------------------------------
 # Convenience: load everything at once
 # ---------------------------------------------------------------------------
 
-def extract_all(include_api: bool = False) -> dict[str, pd.DataFrame]:
+def extract_all(
+    include_realtime: bool = True,
+    include_legacy: bool = False,
+    include_api: bool = False,
+) -> dict[str, pd.DataFrame]:
     """
     Return a dict of all source DataFrames keyed by source name.
 
     Args:
-        include_api: if True, also calls extract_wb_api() (makes live HTTP requests).
-                     Default False so offline/test runs don't hit the network.
+        include_realtime: fetch live finance data via RapidAPI (requires RAPIDAPI_KEY).
+                          Default True — this is now the primary source.
+        include_legacy:   if True, also load the static CSV files
+                          (WGI, IMF, HDI, Polity5, V-Dem).
+        include_api:      if True, also fetch live World Bank WDI data.
     """
-    result = {
-        "wgi":     extract_wgi(),
-        "imf":     extract_imf(),
-        "hdi":     extract_hdi(),
-        "polity5": extract_polity5(),
-        "vdem":    extract_vdem(),
-    }
+    result: dict[str, pd.DataFrame] = {}
+
+    if include_realtime:
+        result["realtime_finance"] = extract_realtime_finance()
+
+    if include_legacy:
+        result["wgi"]     = extract_wgi()
+        result["imf"]     = extract_imf()
+        result["hdi"]     = extract_hdi()
+        result["polity5"] = extract_polity5()
+        result["vdem"]    = extract_vdem()
+
     if include_api:
         result["wb_api"] = extract_wb_api()
+
+    if not result:
+        raise ValueError("No sources selected. Pass include_realtime=True or include_legacy=True.")
+
     total = sum(len(df) for df in result.values())
     print(f"Total: {total:,} rows across {len(result)} sources")
     return result

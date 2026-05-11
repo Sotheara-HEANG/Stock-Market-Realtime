@@ -346,14 +346,25 @@ def normalize_country_names(long_df: DataFrame) -> DataFrame:
 # Clean step 2: drop rows missing both GDP and HDI
 # ---------------------------------------------------------------------------
 
-def drop_missing_gdp_hdi(wide_df: DataFrame) -> DataFrame:
+def drop_missing_price(wide_df: DataFrame) -> DataFrame:
     """
-    Drop rows from the wide DF where BOTH gdp_growth_pct AND hdi_value are null.
+    Drop rows where current_price_usd is null — these have no price anchor
+    and cannot support downstream financial modelling.
+    """
+    if "current_price_usd" not in wide_df.columns:
+        print("  No current_price_usd column — no rows dropped")
+        return wide_df
+    before = wide_df.count()
+    cleaned = wide_df.filter(F.col("current_price_usd").isNotNull())
+    after = cleaned.count()
+    print(f"  Dropped {before - after:,} rows missing price  ({after:,} remain)")
+    return cleaned
 
-    These rows have no economic or human-development anchor — they carry only
-    political/governance scores and cannot support downstream modelling that
-    requires at least one of these two measures.
-    """
+
+def drop_missing_gdp_hdi(wide_df: DataFrame) -> DataFrame:
+    """Legacy filter for country-based data — kept for backward compatibility."""
+    if "gdp_growth_pct" not in wide_df.columns and "hdi_value" not in wide_df.columns:
+        return drop_missing_price(wide_df)
     before = wide_df.count()
     cleaned = wide_df.filter(
         F.col("gdp_growth_pct").isNotNull() | F.col("hdi_value").isNotNull()
@@ -367,19 +378,24 @@ def drop_missing_gdp_hdi(wide_df: DataFrame) -> DataFrame:
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def transform(include_api: bool = False) -> tuple[DataFrame, DataFrame]:
+def transform(
+    include_realtime: bool = True,
+    include_legacy: bool = False,
+    include_api: bool = False,
+) -> tuple[DataFrame, DataFrame]:
     """
     Run the full transform + clean pipeline.
 
-    1. Extract all sources via extract.py (pandas)
+    1. Extract sources via extract.py (pandas)
     2. Convert each to a Spark DataFrame
-    3. Normalise country names across sources
-    4. Union into one long Spark DF
-    5. Pivot to wide Spark DF (one row per country + year)
-    6. Drop rows missing both GDP and HDI
+    3. Union into one long Spark DF
+    4. Pivot to wide Spark DF (one row per asset + year)
+    5. Drop rows missing a price anchor
 
     Args:
-        include_api: pass True to also fetch live World Bank data.
+        include_realtime: fetch live RapidAPI finance data (default True).
+        include_legacy:   also load static CSV files (WGI, IMF, HDI, etc.).
+        include_api:      also fetch live World Bank data.
 
     Returns:
         (long_df, wide_df) — both are Spark DataFrames, wide_df is cleaned.
@@ -389,20 +405,27 @@ def transform(include_api: bool = False) -> tuple[DataFrame, DataFrame]:
     spark = get_spark()
 
     print("=== Extract ===")
-    pdfs = extract_all(include_api=include_api)
+    pdfs = extract_all(
+        include_realtime=include_realtime,
+        include_legacy=include_legacy,
+        include_api=include_api,
+    )
 
     print("\n=== Pandas → Spark ===")
     spark_dfs = to_spark_dict(pdfs, spark)
 
-    print("\n=== Normalise country names ===")
+    print("\n=== Union sources ===")
     long_df = union_sources(spark_dfs)
-    long_df = normalize_country_names(long_df)
 
-    print("\n=== Pivot wide (merge on country + year) ===")
+    if include_legacy:
+        print("\n=== Normalise country names ===")
+        long_df = normalize_country_names(long_df)
+
+    print("\n=== Pivot wide (merge on asset + year) ===")
     wide_df = pivot_wide(long_df)
 
     print("\n=== Clean ===")
-    wide_df = drop_missing_gdp_hdi(wide_df)
+    wide_df = drop_missing_price(wide_df)
 
     print("\n=== Done ===")
     return long_df, wide_df

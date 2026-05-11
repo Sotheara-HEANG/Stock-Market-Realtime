@@ -32,39 +32,19 @@ _ENV_PATH = Path(__file__).parent.parent / ".env"
 # ---------------------------------------------------------------------------
 
 _INDICATOR_META: dict[str, tuple[str, str]] = {
-    # World Bank WGI  (standardised score, −2.5 to +2.5)
-    "control_of_corruption":          ("WGI",     "score"),
-    "government_effectiveness":        ("WGI",     "score"),
-    "political_stability":             ("WGI",     "score"),
-    "regulatory_quality":              ("WGI",     "score"),
-    "rule_of_law":                     ("WGI",     "score"),
-    "voice_and_accountability":        ("WGI",     "score"),
-    # IMF World Economic Outlook
-    "gdp_growth_pct":                  ("IMF",     "percent"),
-    "inflation_pct":                   ("IMF",     "percent"),
-    "unemployment_pct":                ("IMF",     "percent"),
-    "current_account_balance_usd_bn":  ("IMF",     "billion USD"),
-    "gross_govt_debt_pct_gdp":         ("IMF",     "percent"),
-    "gdp_usd_bn":                      ("IMF",     "billion USD"),
-    # UNDP Human Development Index
-    "hdi_value":                       ("UNDP",    "index"),
-    "life_expectancy_years":           ("UNDP",    "years"),
-    "expected_schooling_years":        ("UNDP",    "years"),
-    "mean_schooling_years":            ("UNDP",    "years"),
-    "gni_per_capita_2017ppp":          ("UNDP",    "2017 PPP USD"),
-    # Polity5 political regime scores
-    "polity2_score":                   ("Polity5", "score"),
-    "democracy_score":                 ("Polity5", "score"),
-    "autocracy_score":                 ("Polity5", "score"),
-    # V-Dem democracy indices (0–1)
-    "electoral_democracy_index":       ("V-Dem",   "index"),
-    "liberal_democracy_index":         ("V-Dem",   "index"),
-    "participatory_democracy_index":   ("V-Dem",   "index"),
+    # RapidAPI real-time finance data
+    "current_price_usd":        ("RapidAPI", "USD"),
+    "open_price_usd":           ("RapidAPI", "USD"),
+    "day_high_usd":             ("RapidAPI", "USD"),
+    "day_low_usd":              ("RapidAPI", "USD"),
+    "trading_volume":           ("RapidAPI", "count"),
+    "previous_close_usd":       ("RapidAPI", "USD"),
+    "price_change_usd":         ("RapidAPI", "USD"),
+    "price_change_pct":         ("RapidAPI", "percent"),
     # Derived features (enrich.py)
-    "gdp_growth_yoy_calc":             ("derived", "percent"),
-    "governance_composite":            ("derived", "score"),
-    "regional_avg_gdp_growth":         ("derived", "percent"),
-    "regional_avg_governance":         ("derived", "score"),
+    "intraday_range_pct":       ("derived",  "percent"),
+    "sector_avg_price":         ("derived",  "USD"),
+    "sector_avg_change_pct":    ("derived",  "percent"),
 }
 
 # ---------------------------------------------------------------------------
@@ -113,61 +93,57 @@ def _drop_oracle_tables(conn) -> None:
 
 def _build_countries(pdf: pd.DataFrame) -> pd.DataFrame:
     """
-    Return a tidy countries DataFrame with a sequential integer id.
-    Rows where country_code is null or blank are excluded.
-    continent column is optional — present only when enrich() has been run.
+    Build an assets table keyed by company/asset name (country_name column).
+
+    For real-time finance data, country_code is empty and country_name holds
+    the company name (e.g. "Apple Inc"). Each unique name gets a sequential id.
+    The sector column is optional — present only when enrich() has been run.
     """
-    has_code = pdf["country_code"].notna() & (pdf["country_code"].str.strip() != "")
+    cols = ["country_name"]
+    if "sector" in pdf.columns:
+        cols.append("sector")
 
-    cols = ["country_code", "country_name"]
-    if "continent" in pdf.columns:
-        cols.append("continent")
-
-    countries = (
-        pdf.loc[has_code, cols]
-        .drop_duplicates(subset=["country_code"])
-        .rename(columns={
-            "country_code": "iso_code",
-            "country_name": "name",
-            "continent":    "region",
-        })
+    companies = (
+        pdf[cols]
+        .drop_duplicates(subset=["country_name"])
+        .rename(columns={"country_name": "name", "sector": "region"})
         .reset_index(drop=True)
     )
 
-    if "region" not in countries.columns:
-        countries["region"] = None
+    companies["iso_code"] = ""
+    if "region" not in companies.columns:
+        companies["region"] = None
 
-    countries.insert(0, "id", countries.index + 1)
-    return countries
+    companies.insert(0, "id", companies.index + 1)
+    return companies[["id", "iso_code", "name", "region"]]
 
 
 def _build_indicators(pdf: pd.DataFrame, countries: pd.DataFrame) -> pd.DataFrame:
     """
-    Melt the wide DataFrame to long format, attach country_id via the
-    countries table, and attach source/unit metadata.
+    Melt the wide DataFrame to long format, attach asset_id via the
+    countries table (keyed by name), and attach source/unit metadata.
 
-    Rows with null values and rows whose country_code has no match in
-    the countries table are dropped.
+    Rows with null values and rows whose company name has no match are dropped.
     """
     indicator_cols = [c for c in pdf.columns if c in _INDICATOR_META]
 
-    long = pdf[["country_code", "year"] + indicator_cols].melt(
-        id_vars=["country_code", "year"],
+    long = pdf[["country_name", "year"] + indicator_cols].melt(
+        id_vars=["country_name", "year"],
         value_vars=indicator_cols,
         var_name="indicator",
         value_name="value",
     )
 
-    long = long.dropna(subset=["value", "country_code"])
-    long = long[long["country_code"].str.strip() != ""]
+    long = long.dropna(subset=["value", "country_name"])
+    long = long[long["country_name"].str.strip() != ""]
 
     long["source"] = long["indicator"].map(lambda c: _INDICATOR_META[c][0])
     long["unit"]   = long["indicator"].map(lambda c: _INDICATOR_META[c][1])
     long["year"]   = long["year"].astype(int)
 
-    # Join to get country_id; rows with no match are dropped
-    id_map = countries.set_index("iso_code")["id"]
-    long["country_id"] = long["country_code"].map(id_map)
+    # Join to get company id; rows with no match are dropped
+    id_map = countries.set_index("name")["id"]
+    long["country_id"] = long["country_name"].map(id_map)
     long = long.dropna(subset=["country_id"])
     long["country_id"] = long["country_id"].astype(int)
 
