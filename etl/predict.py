@@ -45,15 +45,14 @@ warnings.filterwarnings("ignore")
 # Configuration
 # ---------------------------------------------------------------------------
 
-HORIZON = 3          # years ahead to forecast
-MIN_OBS = 10         # minimum non-null data points to fit a model
+HORIZON = 3          # periods ahead to forecast
+MIN_OBS = 3          # minimum non-null data points to fit a model
 
 INDICATORS = [
-    "gdp_growth_pct",
-    "inflation_pct",
-    "unemployment_pct",
-    "governance_composite",
-    "hdi_value",
+    "current_price_usd",
+    "price_change_pct",
+    "trading_volume",
+    "intraday_range_pct",
 ]
 
 _ENV_PATH = Path(__file__).parent.parent / ".env"
@@ -84,14 +83,14 @@ def _load_indicators(engine) -> pd.DataFrame:
     placeholders = ", ".join(f"'{i}'" for i in INDICATORS)
     query = f"""
         SELECT i.country_id,
-               c.iso_code,
+               c.name AS asset_name,
                i.indicator,
                i.year,
                i.value
         FROM   indicators i
         JOIN   countries  c ON c.id = i.country_id
         WHERE  i.indicator IN ({placeholders})
-        ORDER  BY c.iso_code, i.indicator, i.year
+        ORDER  BY c.name, i.indicator, i.year
     """
     df = pd.read_sql(query, engine)
     df["year"]  = df["year"].astype(int)
