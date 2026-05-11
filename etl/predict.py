@@ -75,33 +75,35 @@ def _get_engine():
 
 def _load_indicators(engine) -> pd.DataFrame:
     """
-    Pull the indicators and countries tables from PostgreSQL and return a
-    wide-ish DataFrame with columns:
-        country_id, iso_code, indicator, year, value
-    filtered to only the indicators we will model.
+    Read gold.fact_prices + gold.dim_asset and return a long-format DataFrame:
+        asset_id, indicator, year, value
+    melted from the price columns, filtered to INDICATORS.
     """
-    placeholders = ", ".join(f"'{i}'" for i in INDICATORS)
+    price_cols = ", ".join(f"f.{c}" for c in INDICATORS if c != "price_momentum")
     query = f"""
-        SELECT i.country_id,
-               c.name AS asset_name,
-               i.indicator,
-               i.year,
-               i.value
-        FROM   indicators i
-        JOIN   countries  c ON c.id = i.country_id
-        WHERE  i.indicator IN ({placeholders})
-        ORDER  BY c.name, i.indicator, i.year
+        SELECT f.asset_id,
+               d.company_name AS asset_name,
+               f.year,
+               {price_cols}
+        FROM   gold.fact_prices f
+        JOIN   gold.dim_asset   d ON d.asset_id = f.asset_id
+        ORDER  BY d.company_name, f.year
     """
-    df = pd.read_sql(query, engine)
-    df["year"]  = df["year"].astype(int)
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
-    return df
+    try:
+        wide = pd.read_sql(query, engine)
+    except Exception:
+        return pd.DataFrame(columns=["asset_id", "indicator", "year", "value"])
 
-
-def _load_country_id_map(engine) -> dict[str, int]:
-    """Return {iso_code: id} from the countries table."""
-    df = pd.read_sql("SELECT id, iso_code FROM countries", engine)
-    return dict(zip(df["iso_code"], df["id"]))
+    numeric_cols = [c for c in INDICATORS if c in wide.columns and c != "price_momentum"]
+    long = wide.melt(
+        id_vars=["asset_id", "asset_name", "year"],
+        value_vars=numeric_cols,
+        var_name="indicator",
+        value_name="value",
+    )
+    long["year"]  = long["year"].astype(int)
+    long["value"] = pd.to_numeric(long["value"], errors="coerce")
+    return long.rename(columns={"asset_id": "country_id"})
 
 
 # ---------------------------------------------------------------------------
@@ -243,18 +245,19 @@ def predict(engine=None) -> pd.DataFrame:
 
     print("=== Predict ===")
 
-    print("  [1/4] Loading indicators from PostgreSQL...")
+    print("  [1/4] Loading price data from gold.fact_prices...")
     df = _load_indicators(engine)
+    if df.empty:
+        print("  gold.fact_prices is empty — run load() first. Skipping.")
+        return pd.DataFrame()
     print(f"        {len(df):,} rows  ({df['indicator'].nunique()} indicators, "
-          f"{df['country_id'].nunique()} countries)")
-
-    country_id_map = _load_country_id_map(engine)
+          f"{df['country_id'].nunique()} assets)")
 
     print(f"  [2/4] Fitting models (horizon={HORIZON} yrs, min_obs={MIN_OBS})...")
     all_rows: list[dict] = []
     skipped = 0
 
-    for (country_id, indicator), grp in df.groupby(["country_id", "indicator"]):
+    for (asset_id, indicator), grp in df.groupby(["country_id", "indicator"]):
         series = (
             grp[["year", "value"]]
             .dropna(subset=["value"])
@@ -267,7 +270,7 @@ def predict(engine=None) -> pd.DataFrame:
             skipped += 1
             continue
 
-        all_rows.extend(_fit_series(int(country_id), indicator, series))
+        all_rows.extend(_fit_series(int(asset_id), indicator, series))
 
     total_series  = df.groupby(["country_id", "indicator"]).ngroups
     fitted_series = total_series - skipped
@@ -275,18 +278,18 @@ def predict(engine=None) -> pd.DataFrame:
     print(f"        {len(all_rows):,} prediction rows generated")
 
     if not all_rows:
-        print("  No predictions to write.")
+        print("  No predictions to write (not enough historical data yet).")
         return pd.DataFrame()
 
     preds_df = pd.DataFrame(all_rows)
 
-    print("  [3/4] Writing to predictions table...")
-    # Create table if it was dropped by load.py CASCADE, then truncate for idempotency
+    print("  [3/4] Writing to gold.fact_predictions...")
     with engine.begin() as conn:
+        conn.execute(text("CREATE SCHEMA IF NOT EXISTS gold"))
         conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS predictions (
-                id              SERIAL PRIMARY KEY,
-                country_id      INT          NOT NULL,
+            CREATE TABLE IF NOT EXISTS gold.fact_predictions (
+                id              SERIAL       PRIMARY KEY,
+                asset_id        INT          NOT NULL,
                 indicator       VARCHAR(100) NOT NULL,
                 model_name      VARCHAR(100) NOT NULL,
                 predicted_year  SMALLINT     NOT NULL,
@@ -294,20 +297,17 @@ def predict(engine=None) -> pd.DataFrame:
                 confidence_low  NUMERIC(18,4),
                 confidence_high NUMERIC(18,4),
                 run_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-                UNIQUE (country_id, indicator, model_name, predicted_year)
+                UNIQUE (asset_id, indicator, model_name, predicted_year)
             )
         """))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_predictions_country ON predictions(country_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_predictions_model   ON predictions(model_name)"))
-        conn.execute(text("TRUNCATE TABLE predictions RESTART IDENTITY CASCADE"))
+        conn.execute(text("TRUNCATE TABLE gold.fact_predictions RESTART IDENTITY CASCADE"))
+
+    preds_df = preds_df.rename(columns={"country_id": "asset_id"})
     preds_df.to_sql(
-        "predictions",
-        engine,
-        if_exists="append",
-        index=False,
-        chunksize=2_000,
+        "fact_predictions", engine, schema="gold",
+        if_exists="append", index=False, chunksize=2_000,
     )
-    print(f"        {len(preds_df):,} rows written")
+    print(f"        {len(preds_df):,} rows → gold.fact_predictions")
 
     print("  [4/4] Summary:")
     summary = (

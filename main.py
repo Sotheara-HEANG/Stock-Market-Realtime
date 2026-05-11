@@ -58,7 +58,7 @@ if __name__ == "__main__":
     long_df   = union_sources(spark_dfs)
     long_df   = normalize_country_names(long_df)
     wide_df   = pivot_wide(long_df)
-    wide_df   = drop_missing_gdp_hdi(wide_df)
+    wide_df   = drop_missing_price(wide_df)
 
     # ------------------------------------------------------------------
     # Step 3 — Enrich
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     print("\n" + "=" * 50)
     print("Step 4/5 — Load")
     print("=" * 50)
-    load(enriched_df)
+    load(pdfs, enriched_df)
 
     spark.stop()
 
