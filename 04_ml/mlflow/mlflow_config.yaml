@@ -1,11 +1,10 @@
 mlflow:
-  tracking_uri: "http://localhost:5001"   # MLflow server (docker-compose service)
-  experiment_name: "econ-governance-forecasting"
-  artifact_location: "mlflow-artifacts"
+  tracking_uri: "mlruns"            # local file-based tracking (no server needed)
+  experiment_name: "finance-price-forecasting"
+  artifact_location: "mlruns/artifacts"
 
-  # Tags applied to every run
   default_tags:
-    project: "econ-governance-pipeline"
+    project: "real-time-finance-pipeline"
     team: "data-engineering"
 
 models:
@@ -24,12 +23,11 @@ models:
       optimized: true
 
 indicators:
-  - gdp_growth_pct
-  - inflation_pct
-  - unemployment_pct
-  - governance_composite
-  - hdi_value
+  - current_price_usd
+  - price_change_pct
+  - trading_volume
+  - intraday_range_pct
 
 training:
-  min_observations: 10
-  test_years: 3          # last N years held out for evaluation
+  min_observations: 3
+  test_size: 1          # hold out last N points for evaluation

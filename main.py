@@ -1,13 +1,13 @@
 """
 main.py — run the real-time finance pipeline end to end.
 
-    Extract → Transform → Enrich → Load → Predict
+    Extract → Transform → Enrich → Load → Predict → MLflow Train
 
 Usage:
     python main.py                # real-time finance data (default)
     python main.py --legacy       # also load static CSV files (WGI, IMF, HDI, etc.)
     python main.py --api          # also fetch live World Bank data
-    python main.py --no-predict   # skip the prediction step
+    python main.py --no-predict   # skip predict + MLflow steps
 """
 
 from __future__ import annotations
@@ -29,6 +29,11 @@ from etl.transform import (
 from etl.enrich import enrich
 from etl.load import load
 from etl.predict import predict
+
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).parent / "04_ml" / "training"))
+from train import train as mlflow_train
 
 if __name__ == "__main__":
     include_legacy   = "--legacy" in sys.argv
@@ -79,12 +84,17 @@ if __name__ == "__main__":
     spark.stop()
 
     # ------------------------------------------------------------------
-    # Step 5 — Predict
+    # Step 5 — Predict + MLflow Training
     # ------------------------------------------------------------------
     if not skip_predict:
         print("\n" + "=" * 50)
-        print("Step 5/5 — Predict")
+        print("Step 5a/5 — Predict")
         print("=" * 50)
         predict()
+
+        print("\n" + "=" * 50)
+        print("Step 5b/5 — MLflow Training")
+        print("=" * 50)
+        mlflow_train()
     else:
-        print("\nStep 5/5 — Predict  [skipped]")
+        print("\nStep 5/5 — Predict + MLflow  [skipped]")
