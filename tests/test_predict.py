@@ -80,6 +80,18 @@ class TestLinearTrend:
         result = _linear_trend(years, values, forecast_years)
         assert not result.isnull().any().any()
 
+    def test_price_forecasts_are_non_negative(self):
+        years = np.arange(2022, 2026)
+        values = np.array([94.0, 96.0, 98.0, 100.0])
+        forecast_years = np.arange(2026, 2029)
+        result = _linear_trend(years, values, forecast_years)
+        score_cols = ["predicted_value", "confidence_low", "confidence_high"]
+        assert result[score_cols].ge(0).all().all()
+
+        values = np.array([6.0, 4.0, 2.0, 0.0])
+        result = _linear_trend(years, values, forecast_years)
+        assert result[score_cols].ge(0).all().all()
+
 
 # ---------------------------------------------------------------------------
 # _holt_smoothing
@@ -120,3 +132,15 @@ class TestHoltSmoothing:
         years, values, forecast_years = linear_series
         result = _holt_smoothing(years, values, forecast_years)
         assert not result.isnull().any().any()
+
+    def test_price_forecasts_are_non_negative(self):
+        years = np.arange(2021, 2026)
+        values = np.array([92.0, 94.0, 96.0, 98.0, 100.0])
+        forecast_years = np.arange(2026, 2029)
+        result = _holt_smoothing(years, values, forecast_years)
+        score_cols = ["predicted_value", "confidence_low", "confidence_high"]
+        assert result[score_cols].ge(0).all().all()
+
+        values = np.array([8.0, 6.0, 4.0, 2.0, 0.0])
+        result = _holt_smoothing(years, values, forecast_years)
+        assert result[score_cols].ge(0).all().all()

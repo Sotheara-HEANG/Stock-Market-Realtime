@@ -1,10 +1,10 @@
 """
-train.py — MLflow-tracked training for finance price forecasting.
+train.py - MLflow-tracked training for stock price forecasting.
 
 For each model type (linear_trend, holt_smoothing):
   1. Opens an MLflow run
-  2. Logs hyperparameters (horizon, min_obs, n_assets, indicators)
-  3. Fits models on gold.fact_prices data
+  2. Logs hyperparameters (horizon, min_obs, n_tickers, indicators)
+  3. Fits models on gold.fact_commodity_prices data
   4. Logs metrics (MAE, RMSE, MAPE, R²) when hold-out data is available
   5. Saves a predictions CSV as an MLflow artifact
   6. Writes all predictions to gold.fact_predictions
@@ -16,7 +16,7 @@ MLflow UI:
 Usage:
     python 04_ml/training/train.py
     python 04_ml/training/train.py --no-register
-    python 04_ml/training/train.py --indicator current_price_usd
+    python 04_ml/training/train.py --indicator close_price
 """
 
 from __future__ import annotations
@@ -26,12 +26,14 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import mlflow
 import numpy as np
 import pandas as pd
 import yaml
 from dotenv import load_dotenv
+from mlflow.tracking import MlflowClient
 from sqlalchemy import text
 
 # Allow running from project root or from within 04_ml/
@@ -62,13 +64,128 @@ def _load_config() -> dict:
         return raw.get("mlflow", raw)
     return {
         "tracking_uri":         "mlruns",
-        "experiment_name":      "finance-price-forecasting",
-        "registered_model_name":"finance-forecaster",
+        "experiment_name":      "finnhub-stock-forecasting",
+        "artifact_location":    "mlartifacts/finnhub-stock-forecasting",
+        "registered_model_name":"finnhub-stock-forecaster",
     }
 
 
+def _resolve_local_uri(uri: str) -> str:
+    parsed = urlparse(uri)
+    if parsed.scheme and parsed.scheme != "file":
+        return uri
+
+    path = Path(parsed.path if parsed.scheme == "file" else uri)
+    if not path.is_absolute():
+        path = _PROJECT_ROOT / path
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+def _resolve_artifact_location(cfg: dict) -> str:
+    raw_location = cfg.get("artifact_location") or "mlartifacts/finnhub-stock-forecasting"
+    parsed = urlparse(raw_location)
+    if parsed.scheme and parsed.scheme != "file":
+        return raw_location
+
+    path = Path(parsed.path if parsed.scheme == "file" else raw_location)
+    if not path.is_absolute():
+        path = _PROJECT_ROOT / path
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+def _artifact_location_writable(location: str | None) -> bool:
+    if not location:
+        return False
+
+    parsed = urlparse(location)
+    if parsed.scheme and parsed.scheme != "file":
+        return True
+
+    path = Path(parsed.path if parsed.scheme == "file" else location)
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+    return os.access(path, os.W_OK)
+
+
+def _same_artifact_location(left: str | None, right: str) -> bool:
+    if not left:
+        return False
+
+    def normalise(location: str) -> str:
+        parsed = urlparse(location)
+        if parsed.scheme and parsed.scheme != "file":
+            return location.rstrip("/")
+        path = Path(parsed.path if parsed.scheme == "file" else location)
+        if not path.is_absolute():
+            path = _PROJECT_ROOT / path
+        return str(path.resolve(strict=False))
+
+    return normalise(left) == normalise(right)
+
+
+def _repair_file_store_experiment(cfg: dict) -> None:
+    """
+    Repair local MLflow metadata created inside Docker.
+
+    Existing mlruns metadata may point artifact paths at /app, which is valid in
+    containers but read-only or missing from a host Python run. MLflow does not
+    expose an API to edit an experiment's artifact root, so for the local file
+    store we update the experiment meta.yaml before starting new runs.
+    """
+    tracking_uri = mlflow.get_tracking_uri()
+    parsed = urlparse(tracking_uri)
+    if parsed.scheme and parsed.scheme != "file":
+        return
+
+    tracking_path = Path(parsed.path if parsed.scheme == "file" else tracking_uri)
+    if not tracking_path.exists():
+        return
+
+    experiment_name = cfg.get("experiment_name", "finnhub-stock-forecasting")
+    artifact_location = _resolve_artifact_location(cfg)
+
+    for meta_path in tracking_path.glob("*/meta.yaml"):
+        with open(meta_path) as f:
+            meta = yaml.safe_load(f) or {}
+
+        if meta.get("name") != experiment_name or meta.get("lifecycle_stage") == "deleted":
+            continue
+
+        current_location = meta.get("artifact_location")
+        if (
+            _same_artifact_location(current_location, artifact_location)
+            and _artifact_location_writable(current_location)
+        ):
+            return
+
+        meta["artifact_location"] = artifact_location
+        with open(meta_path, "w") as f:
+            yaml.safe_dump(meta, f, sort_keys=False)
+        print(f"  MLflow artifact location repaired -> {artifact_location}")
+        return
+
+
+def _configure_mlflow(cfg: dict) -> None:
+    tracking_uri = _resolve_local_uri(cfg.get("tracking_uri", "mlruns"))
+    artifact_location = _resolve_artifact_location(cfg)
+    mlflow.set_tracking_uri(tracking_uri)
+    _repair_file_store_experiment(cfg)
+
+    client = MlflowClient()
+    experiment_name = cfg.get("experiment_name", "finnhub-stock-forecasting")
+    experiment = client.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        client.create_experiment(experiment_name, artifact_location=artifact_location)
+
+    mlflow.set_experiment(experiment_name)
+
+
 # ---------------------------------------------------------------------------
-# Fitting one model type across all (asset, indicator) series
+# Fitting one model type across all (ticker, indicator) series
 # ---------------------------------------------------------------------------
 
 def _fit_model(
@@ -77,7 +194,7 @@ def _fit_model(
     test_size: int = 1,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Fit one model across every (asset_id, indicator) group in df.
+    Fit one model across every (ticker, indicator) group in df.
 
     Returns:
         predictions_df — ready to write to gold.fact_predictions
@@ -88,7 +205,7 @@ def _fit_model(
     pred_rows: list[dict]   = []
     metric_rows: list[dict] = []
 
-    for (asset_id, indicator), grp in df.groupby(["country_id", "indicator"]):
+    for (commodity_id, indicator), grp in df.groupby(["country_id", "indicator"]):
         series = (
             grp[["year", "value"]]
             .dropna(subset=["value"])
@@ -114,12 +231,12 @@ def _fit_model(
         try:
             preds = fn(train["year"].values, train["value"].values, forecast_years)
         except Exception as exc:
-            print(f"    [warn] {model_name} failed asset={asset_id} {indicator}: {exc}")
+            print(f"    [warn] {model_name} failed commodity_id={commodity_id} {indicator}: {exc}")
             continue
 
         for _, row in preds.iterrows():
             pred_rows.append({
-                "asset_id":        int(asset_id),
+                "commodity_id":    int(commodity_id),
                 "indicator":       indicator,
                 "model_name":      model_name,
                 "predicted_year":  row["predicted_year"],
@@ -140,14 +257,14 @@ def _fit_model(
                     pred.values[:1],
                 )
                 metric_rows.append({
-                    "asset_id":  int(asset_id),
+                    "commodity_id":  int(commodity_id),
                     "indicator": indicator,
                     **m,
                 })
 
     pred_df   = pd.DataFrame(pred_rows)
     metric_df = pd.DataFrame(metric_rows) if metric_rows else pd.DataFrame(
-        columns=["asset_id", "indicator", "mae", "rmse", "mape", "r2"]
+        columns=["commodity_id", "indicator", "mae", "rmse", "mape", "r2"]
     )
     return pred_df, metric_df
 
@@ -171,19 +288,19 @@ def _run_experiment(
             "horizon":     HORIZON,
             "min_obs":     MIN_OBS,
             "test_size":   test_size,
-            "n_assets":    int(df["country_id"].nunique()),
+            "n_tickers":    int(df["country_id"].nunique()),
             "n_indicators":len(INDICATORS),
             "indicators":  ",".join(INDICATORS),
         })
         mlflow.set_tags({
-            "project": cfg.get("default_tags", {}).get("project", "finance-pipeline"),
+            "project": cfg.get("default_tags", {}).get("project", "finnhub-trading-pipeline"),
             "team":    cfg.get("default_tags", {}).get("team", "data-engineering"),
         })
 
         # ── Fit ─────────────────────────────────────────────────────────────
         preds_df, metric_df = _fit_model(df, model_name, test_size=test_size)
         n_series = int(df.groupby(["country_id", "indicator"]).ngroups)
-        n_fitted = int(preds_df["asset_id"].nunique()) if not preds_df.empty else 0
+        n_fitted = int(preds_df["commodity_id"].nunique()) if not preds_df.empty else 0
 
         mlflow.log_metric("n_series_total",  n_series)
         mlflow.log_metric("n_series_fitted", n_fitted)
@@ -239,7 +356,7 @@ def _write_predictions(all_preds: list[pd.DataFrame], engine) -> None:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS gold.fact_predictions (
                 id              SERIAL       PRIMARY KEY,
-                asset_id        INT          NOT NULL,
+                commodity_id    INT          NOT NULL REFERENCES gold.dim_commodity (commodity_id),
                 indicator       VARCHAR(100) NOT NULL,
                 model_name      VARCHAR(100) NOT NULL,
                 predicted_year  SMALLINT     NOT NULL,
@@ -247,7 +364,7 @@ def _write_predictions(all_preds: list[pd.DataFrame], engine) -> None:
                 confidence_low  NUMERIC(18,4),
                 confidence_high NUMERIC(18,4),
                 run_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-                UNIQUE (asset_id, indicator, model_name, predicted_year)
+                UNIQUE (commodity_id, indicator, model_name, predicted_year)
             )
         """))
         conn.execute(text("TRUNCATE TABLE gold.fact_predictions RESTART IDENTITY CASCADE"))
@@ -256,7 +373,7 @@ def _write_predictions(all_preds: list[pd.DataFrame], engine) -> None:
         "fact_predictions", engine, schema="gold",
         if_exists="append", index=False, chunksize=2_000,
     )
-    print(f"  {len(combined):,} rows → gold.fact_predictions")
+    print(f"  {len(combined):,} rows -> gold.fact_predictions")
 
 
 # ---------------------------------------------------------------------------
@@ -269,8 +386,7 @@ def train(
 ) -> None:
     cfg = _load_config()
 
-    mlflow.set_tracking_uri(cfg.get("tracking_uri", "mlruns"))
-    mlflow.set_experiment(cfg.get("experiment_name", "finance-price-forecasting"))
+    _configure_mlflow(cfg)
 
     test_size = int(cfg.get("training", {}).get("test_size", 1))
 
@@ -280,18 +396,18 @@ def train(
     print(f"  Tracking URI : {mlflow.get_tracking_uri()}")
     print(f"  Experiment   : {cfg.get('experiment_name')}")
 
-    print("\n  Loading data from gold.fact_prices...")
+    print("\n  Loading data from gold.fact_commodity_prices...")
     df = _load_indicators(engine)
 
     if df.empty:
-        print("  gold.fact_prices is empty — run main.py first, then re-run train.py.")
+        print("  gold.fact_commodity_prices is empty - run main.py first, then re-run train.py.")
         engine.dispose()
         return
 
     if filter_indicator:
         df = df[df["indicator"] == filter_indicator]
 
-    print(f"  {len(df):,} rows | {df['country_id'].nunique()} assets "
+    print(f"  {len(df):,} rows | {df['country_id'].nunique()} tickers "
           f"| {df['indicator'].nunique()} indicators\n")
 
     model_types = ["linear_trend", "holt_smoothing"]
@@ -314,7 +430,7 @@ def train(
 
 if __name__ == "__main__":
     load_dotenv(_PROJECT_ROOT / ".env")
-    parser = argparse.ArgumentParser(description="MLflow-tracked finance forecasting")
+    parser = argparse.ArgumentParser(description="MLflow-tracked stock price forecasting")
     parser.add_argument("--no-register",  action="store_true", help="skip model registry")
     parser.add_argument("--indicator",    default=None,        help="train one indicator only")
     args = parser.parse_args()

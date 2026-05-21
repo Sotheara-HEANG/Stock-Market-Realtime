@@ -1,29 +1,11 @@
 """
-app.py — FastAPI backend for the real-time finance pipeline.
-
-Reads from the Gold warehouse layer (gold.dim_asset, gold.fact_prices,
-gold.fact_predictions) and exposes a REST API consumed by the dashboard.
-
-Endpoints:
-  GET /health
-  GET /assets                              — list all tracked companies
-  GET /prices                              — current prices for all assets
-  GET /prices/{asset_name}                 — metrics for one asset
-  GET /predictions/{asset_name}            — forecasts for one asset
-  GET /sectors                             — list distinct sectors
-  GET /sectors/{sector}/prices             — prices for all assets in a sector
-  GET /top?indicator=price_change_pct&n=10 — top N assets by any indicator
-  GET /compare?assets=Apple Inc,NVIDIA Corp— side-by-side comparison
-
-Usage:
-    uvicorn 05_app.api.app:app --reload --port 8000
-    # or from the project root:
-    python -m uvicorn 05_app.api.app:app --reload --port 8000
+app.py - FastAPI backend for the Finnhub stock market pipeline.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -33,13 +15,18 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
 
-_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_PROJECT_ROOT))
+
+from etl.extract import extract_latest_stock_prices
+
+_ENV_PATH = _PROJECT_ROOT / ".env"
 load_dotenv(_ENV_PATH)
 
 app = FastAPI(
-    title="Real-Time Finance Pipeline API",
-    description="Serves data from the Bronze/Silver/Gold warehouse.",
-    version="1.0.0",
+    title="Finnhub Trading API",
+    description="Serves stock prices, warehouse analytics, and forecasts.",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -49,17 +36,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# DB helper
-# ---------------------------------------------------------------------------
 
 def _engine():
-    host     = os.environ["DB_HOST"]
-    port     = os.environ.get("DB_PORT", "5432")
-    dbname   = os.environ["DB_NAME"]
-    user     = os.environ["DB_USER"]
+    host = os.environ["DB_HOST"]
+    port = os.environ.get("DB_PORT", "5432")
+    dbname = os.environ["DB_NAME"]
+    user = os.environ["DB_USER"]
     password = os.environ.get("DB_PASSWORD", "")
-    url      = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
+    url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
     return create_engine(url, pool_pre_ping=True)
 
 
@@ -71,13 +55,57 @@ def _query(sql: str, params: dict | None = None) -> pd.DataFrame:
         engine.dispose()
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
+def _records(df: pd.DataFrame) -> list[dict]:
+    """Return JSON-safe records with pandas NaN/NaT converted to None."""
+    if df.empty:
+        return []
+    return df.astype(object).where(pd.notnull(df), None).to_dict(orient="records")
+
+
+def _record(row: pd.Series) -> dict:
+    return row.astype(object).where(pd.notnull(row), None).to_dict()
+
+
+def _tables_exist(*table_names: str) -> bool:
+    engine = _engine()
+    try:
+        with engine.connect() as conn:
+            for table_name in table_names:
+                exists = conn.execute(
+                    text("SELECT to_regclass(:table_name) IS NOT NULL"),
+                    {"table_name": table_name},
+                ).scalar_one()
+                if not exists:
+                    return False
+            return True
+    finally:
+        engine.dispose()
+
+
+def _live_quote(symbol: str) -> dict:
+    df = extract_latest_stock_prices([symbol.upper()])
+    if df.empty:
+        raise HTTPException(404, f"No stock quote returned for '{symbol}'")
+
+    wide = (
+        df.pivot_table(
+            index=["country_name", "country_code", "year", "source"],
+            columns="indicator",
+            values="value",
+            aggfunc="first",
+        )
+        .reset_index()
+        .rename(columns={
+            "country_name": "commodity_name",
+            "country_code": "symbol",
+        })
+    )
+    return _record(wide.iloc[0])
+
 
 @app.get("/health")
 def health():
-    """Health check — confirms DB connectivity."""
+    """Health check - confirms DB connectivity."""
     try:
         _query("SELECT 1")
         return {"status": "ok", "db": "connected"}
@@ -85,72 +113,108 @@ def health():
         raise HTTPException(status_code=503, detail=f"DB unavailable: {exc}")
 
 
-@app.get("/assets")
-def list_assets():
-    """List all tracked companies from gold.dim_asset."""
+@app.get("/quote")
+def quote(symbol: str = Query(..., description="Stock ticker, for example AAPL")):
+    """Run a live Finnhub quote request."""
+    return _live_quote(symbol)
+
+
+@app.get("/commodities")
+def list_commodities():
+    """List all tracked stocks from gold.dim_commodity."""
+    if not _tables_exist("gold.dim_commodity"):
+        return []
+
     df = _query("""
-        SELECT asset_id, company_name, sector
-        FROM   gold.dim_asset
-        ORDER  BY company_name
+        SELECT commodity_id, symbol, commodity_name, commodity_category
+        FROM   gold.dim_commodity
+        ORDER  BY symbol
     """)
-    return df.to_dict(orient="records")
+    return _records(df)
 
 
 @app.get("/prices")
-def list_prices(sector: Optional[str] = None):
-    """
-    Current price metrics for all assets, ordered by price_change_pct desc.
-    Optional: filter by ?sector=Technology
-    """
-    where = "AND d.sector = :sector" if sector else ""
+def list_prices(
+    category: Optional[str] = None,
+    trend: Optional[str] = None,
+    volatility: Optional[str] = None,
+):
+    """Stock prices and enrichment metrics, optionally filtered."""
+    if not _tables_exist("gold.dim_commodity", "gold.fact_commodity_prices"):
+        return []
+
+    clauses = []
+    params: dict[str, str] = {}
+    if category:
+        clauses.append("d.commodity_category = :category")
+        params["category"] = category
+    if trend:
+        clauses.append("f.price_trend = :trend")
+        params["trend"] = trend.lower()
+    if volatility:
+        clauses.append("f.volatility_level = :volatility")
+        params["volatility"] = volatility.lower()
+
+    where = "WHERE " + " AND ".join(clauses) if clauses else ""
     df = _query(f"""
-        SELECT d.company_name,
-               d.sector,
+        SELECT d.symbol,
+               d.commodity_name,
+               d.commodity_category,
                f.year,
-               f.current_price_usd,
-               f.open_price_usd,
-               f.day_high_usd,
-               f.day_low_usd,
-               f.previous_close_usd,
-               f.price_change_usd,
+               f.open_price,
+               f.high_price,
+               f.low_price,
+               f.close_price,
+               f.latest_price,
+               f.price_change,
                f.price_change_pct,
-               f.trading_volume,
+               f.price_trend,
+               f.intraday_range,
                f.intraday_range_pct,
-               f.price_momentum,
-               f.sector_avg_price,
-               f.sector_avg_change_pct
-        FROM   gold.fact_prices f
-        JOIN   gold.dim_asset   d ON d.asset_id = f.asset_id
-        WHERE  1=1 {where}
-        ORDER  BY f.price_change_pct DESC NULLS LAST
-    """, {"sector": sector} if sector else None)
-    return df.to_dict(orient="records")
+               f.volatility_level,
+               f.category_avg_close,
+               f.category_count
+        FROM   gold.fact_commodity_prices f
+        JOIN   gold.dim_commodity         d ON d.commodity_id = f.commodity_id
+        {where}
+        ORDER  BY f.year DESC, d.symbol
+    """, params)
+    return _records(df)
 
 
-@app.get("/prices/{asset_name}")
-def get_price(asset_name: str):
-    """Price metrics for a single asset."""
+@app.get("/prices/{symbol}")
+def get_prices(symbol: str):
+    """Historical price metrics for a single stock ticker."""
+    if not _tables_exist("gold.dim_commodity", "gold.fact_commodity_prices"):
+        raise HTTPException(404, "Warehouse has no stock price data yet")
+
     df = _query("""
-        SELECT d.company_name, d.sector, f.*
-        FROM   gold.fact_prices f
-        JOIN   gold.dim_asset   d ON d.asset_id = f.asset_id
-        WHERE  d.company_name = :name
+        SELECT d.symbol, d.commodity_name, d.commodity_category, f.*
+        FROM   gold.fact_commodity_prices f
+        JOIN   gold.dim_commodity         d ON d.commodity_id = f.commodity_id
+        WHERE  d.symbol = :symbol
         ORDER  BY f.year DESC
-    """, {"name": asset_name})
+    """, {"symbol": symbol.upper()})
     if df.empty:
-        raise HTTPException(404, f"Asset '{asset_name}' not found")
-    return df.to_dict(orient="records")
+        raise HTTPException(404, f"Ticker '{symbol}' not found")
+    return _records(df)
 
 
-@app.get("/predictions/{asset_name}")
-def get_predictions(asset_name: str, model: Optional[str] = None):
-    """
-    ML forecasts for a single asset.
-    Optional: filter by ?model=linear_trend or ?model=holt_smoothing
-    """
+@app.get("/predictions/{symbol}")
+def get_predictions(symbol: str, model: Optional[str] = None):
+    """ML forecasts for a single stock ticker."""
+    if not _tables_exist("gold.dim_commodity", "gold.fact_predictions"):
+        raise HTTPException(404, "Warehouse has no predictions yet")
+
     where = "AND p.model_name = :model" if model else ""
+    params = {"symbol": symbol.upper()}
+    if model:
+        params["model"] = model
+
     df = _query(f"""
-        SELECT d.company_name,
+        SELECT d.symbol,
+               d.commodity_name,
+               d.commodity_category,
                p.indicator,
                p.model_name,
                p.predicted_year,
@@ -159,99 +223,116 @@ def get_predictions(asset_name: str, model: Optional[str] = None):
                p.confidence_high,
                p.run_at
         FROM   gold.fact_predictions p
-        JOIN   gold.dim_asset        d ON d.asset_id = p.asset_id
-        WHERE  d.company_name = :name {where}
+        JOIN   gold.dim_commodity    d ON d.commodity_id = p.commodity_id
+        WHERE  d.symbol = :symbol {where}
         ORDER  BY p.indicator, p.model_name, p.predicted_year
-    """, {"name": asset_name, "model": model} if model else {"name": asset_name})
+    """, params)
     if df.empty:
-        raise HTTPException(404, f"No predictions found for '{asset_name}'")
-    return df.to_dict(orient="records")
+        raise HTTPException(404, f"No predictions found for '{symbol}'")
+    return _records(df)
 
 
-@app.get("/sectors")
-def list_sectors():
-    """List all distinct sectors from gold.dim_asset."""
+@app.get("/categories")
+def list_categories():
+    """List all market sectors/categories."""
+    if not _tables_exist("gold.dim_commodity"):
+        return []
+
     df = _query("""
-        SELECT DISTINCT sector
-        FROM   gold.dim_asset
-        WHERE  sector IS NOT NULL
-        ORDER  BY sector
+        SELECT DISTINCT commodity_category
+        FROM   gold.dim_commodity
+        WHERE  commodity_category IS NOT NULL
+        ORDER  BY commodity_category
     """)
-    return df["sector"].tolist()
+    return df["commodity_category"].tolist()
 
 
-@app.get("/sectors/{sector}/prices")
-def sector_prices(sector: str):
-    """Current prices for every asset in a sector."""
+@app.get("/categories/{category}/prices")
+def category_prices(category: str):
+    """Latest rows for every tracked stock in a sector/category."""
+    if not _tables_exist("gold.dim_commodity", "gold.fact_commodity_prices"):
+        raise HTTPException(404, "Warehouse has no stock price data yet")
+
     df = _query("""
-        SELECT d.company_name,
-               f.current_price_usd,
+        SELECT d.symbol,
+               d.commodity_name,
+               d.commodity_category,
+               f.year,
+               f.close_price,
                f.price_change_pct,
-               f.trading_volume,
-               f.intraday_range_pct,
-               f.price_momentum
-        FROM   gold.fact_prices f
-        JOIN   gold.dim_asset   d ON d.asset_id = f.asset_id
-        WHERE  d.sector = :sector
-        ORDER  BY f.price_change_pct DESC NULLS LAST
-    """, {"sector": sector})
+               f.price_trend,
+               f.volatility_level
+        FROM   gold.fact_commodity_prices f
+        JOIN   gold.dim_commodity         d ON d.commodity_id = f.commodity_id
+        WHERE  d.commodity_category = :category
+        ORDER  BY f.year DESC, d.symbol
+    """, {"category": category})
     if df.empty:
-        raise HTTPException(404, f"No assets in sector '{sector}'")
-    return df.to_dict(orient="records")
+        raise HTTPException(404, f"No stocks found for category '{category}'")
+    return _records(df)
 
 
 @app.get("/top")
-def top_assets(
-    indicator: str = Query("price_change_pct", description="Metric to rank by"),
-    n:         int = Query(10,                 description="Number of results"),
-    order:     str = Query("desc",             description="asc or desc"),
+def top_commodities(
+    indicator: str = Query("close_price", description="Metric to rank by"),
+    n: int = Query(10, description="Number of results"),
+    order: str = Query("desc", description="asc or desc"),
 ):
-    """Top N assets ranked by any price indicator."""
+    """Top N stocks ranked by a numeric indicator."""
+    if not _tables_exist("gold.dim_commodity", "gold.fact_commodity_prices"):
+        return []
+
     valid = {
-        "current_price_usd", "price_change_pct",
-        "trading_volume", "intraday_range_pct",
-        "price_change_usd", "day_high_usd", "day_low_usd",
+        "open_price", "high_price", "low_price", "close_price", "latest_price",
+        "price_change", "price_change_pct", "intraday_range", "intraday_range_pct",
+        "category_avg_close",
     }
     if indicator not in valid:
         raise HTTPException(400, f"indicator must be one of {sorted(valid)}")
     direction = "DESC" if order.lower() != "asc" else "ASC"
     df = _query(f"""
-        SELECT d.company_name,
-               d.sector,
-               f.current_price_usd,
+        SELECT d.symbol,
+               d.commodity_name,
+               d.commodity_category,
+               f.year,
+               f.close_price,
                f.price_change_pct,
+               f.price_trend,
+               f.volatility_level,
                f.{indicator}
-        FROM   gold.fact_prices f
-        JOIN   gold.dim_asset   d ON d.asset_id = f.asset_id
+        FROM   gold.fact_commodity_prices f
+        JOIN   gold.dim_commodity         d ON d.commodity_id = f.commodity_id
         WHERE  f.{indicator} IS NOT NULL
         ORDER  BY f.{indicator} {direction} NULLS LAST
         LIMIT  :n
     """, {"n": n})
-    return df.to_dict(orient="records")
+    return _records(df)
 
 
 @app.get("/compare")
-def compare_assets(
-    assets: str = Query(..., description="Comma-separated company names"),
+def compare_commodities(
+    symbols: str = Query(..., description="Comma-separated stock tickers"),
 ):
-    """Side-by-side price comparison for multiple assets."""
-    names = [a.strip() for a in assets.split(",") if a.strip()]
+    """Side-by-side comparison for multiple stock tickers."""
+    if not _tables_exist("gold.dim_commodity", "gold.fact_commodity_prices"):
+        return []
+
+    names = [symbol.strip().upper() for symbol in symbols.split(",") if symbol.strip()]
     if not names:
-        raise HTTPException(400, "Provide at least one asset name")
-    placeholders = ", ".join(f"'{n}'" for n in names)
-    df = _query(f"""
-        SELECT d.company_name,
-               d.sector,
-               f.current_price_usd,
+        raise HTTPException(400, "Provide at least one stock ticker")
+
+    df = _query("""
+        SELECT d.symbol,
+               d.commodity_name,
+               d.commodity_category,
+               f.year,
+               f.close_price,
                f.price_change_pct,
-               f.day_high_usd,
-               f.day_low_usd,
-               f.trading_volume,
-               f.intraday_range_pct,
-               f.price_momentum
-        FROM   gold.fact_prices f
-        JOIN   gold.dim_asset   d ON d.asset_id = f.asset_id
-        WHERE  d.company_name IN ({placeholders})
-        ORDER  BY f.price_change_pct DESC NULLS LAST
-    """)
-    return df.to_dict(orient="records")
+               f.price_trend,
+               f.volatility_level
+        FROM   gold.fact_commodity_prices f
+        JOIN   gold.dim_commodity         d ON d.commodity_id = f.commodity_id
+        WHERE  d.symbol = ANY(:symbols)
+        ORDER  BY d.symbol, f.year DESC
+    """, {"symbols": names})
+    return _records(df)

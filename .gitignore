@@ -38,4 +38,5 @@ spark-warehouse/
 
 # MLflow local artifacts
 mlruns/
+mlartifacts/
 04_ml/models/*.csv

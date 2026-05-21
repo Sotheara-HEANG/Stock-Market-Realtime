@@ -1,12 +1,12 @@
 """
-main.py — run the real-time finance pipeline end to end.
+main.py - run the Finnhub trading pipeline end to end.
 
     Extract → Transform → Enrich → Load → Predict → MLflow Train
 
 Usage:
-    python main.py                # real-time finance data (default)
-    python main.py --legacy       # also load static CSV files (WGI, IMF, HDI, etc.)
-    python main.py --api          # also fetch live World Bank data
+    python main.py                # Finnhub stock data (default)
+    python main.py --legacy       # accepted for backwards compatibility
+    python main.py --api          # accepted for backwards compatibility
     python main.py --no-predict   # skip predict + MLflow steps
 """
 
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     # Step 1 — Extract
     # ------------------------------------------------------------------
     print("=" * 50)
-    print("Step 1/5 — Extract")
+    print("Step 1/5 — Extract Finnhub market data")
     print("=" * 50)
     pdfs = extract_all(
         include_realtime=True,
@@ -61,7 +61,8 @@ if __name__ == "__main__":
     print("=" * 50)
     spark_dfs = to_spark_dict(pdfs, spark)
     long_df   = union_sources(spark_dfs)
-    long_df   = normalize_country_names(long_df)
+    if include_legacy:
+        long_df = normalize_country_names(long_df)
     wide_df   = pivot_wide(long_df)
     wide_df   = drop_missing_price(wide_df)
 

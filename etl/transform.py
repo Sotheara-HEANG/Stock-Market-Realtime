@@ -1,30 +1,26 @@
 """
-transform.py — convert pandas DataFrames to PySpark, merge all sources on country + year.
+transform.py - convert pandas stock price DataFrames to PySpark and pivot metrics.
 
 Pipeline:
     pandas DFs (extract.py)
         → Spark DFs (pandas_to_spark)
         → unified long Spark DF (union_sources)       # all rows, all indicators
-        → wide Spark DF (pivot_wide)                  # one row per country+year, indicators as columns
-
-Key notes on join keys:
-    - WGI, IMF, V-Dem  : country_code is ISO-3       → join on (country_code, year)
-    - Polity5           : country_code is Polity scode → join on (country_code, year) as proxy
-    - HDI               : country_code is empty        → only country_name + year available
-
-The wide pivot handles this naturally: rows with the same (country_code, country_name, year)
-are merged; HDI rows (empty country_code) appear as separate rows keyed by country_name alone.
+        → wide Spark DF (pivot_wide)                  # one row per entity+year, indicators as columns
 
 Usage:
     from etl.transform import transform
 
-    long_df, wide_df = transform()          # uses offline sources only
-    long_df, wide_df = transform(api=True)  # also fetches live World Bank data
+    long_df, wide_df = transform()
 """
 
 from __future__ import annotations
 
+import os
+import re
+import subprocess
+import sys
 import warnings
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
@@ -47,16 +43,100 @@ warnings.filterwarnings("ignore")
 _spark: Optional[SparkSession] = None
 
 
+def _parse_java_major(version_output: str) -> int | None:
+    match = re.search(r'version "([^"]+)"', version_output)
+    if not match:
+        return None
+
+    raw_version = match.group(1).split(".", maxsplit=2)
+    try:
+        if raw_version[0] == "1" and len(raw_version) > 1:
+            return int(raw_version[1])
+        return int(raw_version[0])
+    except ValueError:
+        return None
+
+
+def _java_major(java_bin: str = "java") -> int | None:
+    try:
+        proc = subprocess.run(
+            [java_bin, "-version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _parse_java_major(proc.stderr + proc.stdout)
+
+
+def _candidate_java_homes() -> list[Path]:
+    homes: list[Path] = []
+
+    configured = os.environ.get("JAVA_HOME")
+    if configured:
+        homes.append(Path(configured))
+
+    for root in (Path("/Library/Java/JavaVirtualMachines"), Path("/usr/lib/jvm")):
+        if root.exists():
+            homes.extend(path / "Contents" / "Home" for path in root.glob("*.jdk"))
+            homes.extend(path for path in root.glob("*") if (path / "bin" / "java").exists())
+
+    homebrew_root = Path("/opt/homebrew/opt")
+    if homebrew_root.exists():
+        homes.extend(homebrew_root.glob("openjdk*/libexec/openjdk.jdk/Contents/Home"))
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for home in homes:
+        resolved = str(home)
+        if resolved not in seen and (home / "bin" / "java").exists():
+            unique.append(home)
+            seen.add(resolved)
+    return unique
+
+
+def _ensure_supported_java(min_major: int = 17) -> None:
+    current_major = _java_major()
+    if current_major is not None and current_major >= min_major:
+        return
+
+    compatible: list[tuple[int, Path]] = []
+    for home in _candidate_java_homes():
+        major = _java_major(str(home / "bin" / "java"))
+        if major is not None and major >= min_major:
+            compatible.append((major, home))
+
+    if compatible:
+        _, java_home = sorted(compatible, key=lambda item: item[0])[0]
+        os.environ["JAVA_HOME"] = str(java_home)
+        os.environ["PATH"] = f"{java_home / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}"
+        print(f"  Using Java {java_home} for PySpark")
+        return
+
+    detected = f"Java {current_major}" if current_major is not None else "no Java runtime"
+    raise RuntimeError(
+        f"PySpark requires Java {min_major}+ but found {detected}. "
+        "Install JDK 17+ or set JAVA_HOME to a compatible JDK before running the pipeline."
+    )
+
+
 def get_spark() -> SparkSession:
     """Return a singleton SparkSession, creating it on first call."""
     global _spark
     if _spark is None:
+        _ensure_supported_java()
+        os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+        os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
         _spark = (
             SparkSession.builder
-            .appName("econ-governance-pipeline")
+            .appName("finnhub-trading-pipeline")
             .config("spark.sql.session.timeZone", "UTC")
             # Reduce default shuffle partitions for local single-node runs
             .config("spark.sql.shuffle.partitions", "8")
+            .config("spark.pyspark.python", sys.executable)
+            .config("spark.pyspark.driver.python", sys.executable)
             .getOrCreate()
         )
         _spark.sparkContext.setLogLevel("WARN")
@@ -142,70 +222,23 @@ def union_sources(spark_dfs: dict[str, DataFrame]) -> DataFrame:
 def pivot_wide(long_df: DataFrame) -> DataFrame:
     """
     Pivot the unified long DF to a wide format:
-        (country_code, country_name, year)  →  one column per indicator
+        (country_code, country_name, year) → one column per indicator
 
-    country_name is resolved by taking the most common non-empty name for
-    each country_code (coalesces names across sources that share an ISO code).
-
-    HDI rows (empty country_code) are joined on country_name + year instead.
+    For the trading pipeline, country_code carries the ticker and country_name
+    carries the company display name.
     """
-    # --- Resolve a single country_name per country_code ---
-    # Some sources have names, others don't; pick the most frequent non-empty one.
-    name_resolution = (
+    wide_df = (
         long_df
-        .filter(
-            (F.col("country_code") != "") &
-            (F.col("country_name") != "")
-        )
-        .groupBy("country_code", "country_name")
-        .count()
-        .withColumn(
-            "rn",
-            F.row_number().over(
-                __window_by("country_code", order_by="count", desc=True)
-            ),
-        )
-        .filter(F.col("rn") == 1)
-        .drop("count", "rn")
-    )
-
-    # --- Split: rows that have an ISO-3 country_code vs HDI (empty code) ---
-    has_code = long_df.filter(F.col("country_code") != "")
-    no_code  = long_df.filter(F.col("country_code") == "")   # HDI only
-
-    # Pivot the ISO-coded rows
-    wide_coded = (
-        has_code
-        .groupBy("country_code", "year")
+        .groupBy("country_code", "country_name", "year")
         .pivot("indicator")
         .agg(F.first("value"))
-        .join(name_resolution, on="country_code", how="left")
     )
 
-    # Pivot the name-only rows (HDI)
-    wide_hdi = (
-        no_code
-        .groupBy("country_name", "year")
-        .pivot("indicator")
-        .agg(F.first("value"))
-        .withColumn("country_code", F.lit(""))
-    )
-
-    # Align columns so both halves can be unioned
-    coded_cols = set(wide_coded.columns)
-    hdi_cols   = set(wide_hdi.columns)
-
-    for col in coded_cols - hdi_cols:
-        wide_hdi = wide_hdi.withColumn(col, F.lit(None).cast(DoubleType()))
-    for col in hdi_cols - coded_cols:
-        wide_coded = wide_coded.withColumn(col, F.lit(None).cast(DoubleType()))
-
-    # Use same column order for the union
     all_cols = sorted(
-        set(wide_coded.columns) | set(wide_hdi.columns),
+        set(wide_df.columns),
         key=lambda c: (c not in ("country_code", "country_name", "year"), c),
     )
-    wide_df = wide_coded.select(all_cols).unionAll(wide_hdi.select(all_cols))
+    wide_df = wide_df.select(all_cols)
 
     print(f"  Wide DF: {wide_df.count():,} rows  ×  {len(wide_df.columns)} columns")
     return wide_df
@@ -348,17 +381,25 @@ def normalize_country_names(long_df: DataFrame) -> DataFrame:
 
 def drop_missing_price(wide_df: DataFrame) -> DataFrame:
     """
-    Drop rows where current_price_usd is null — these have no price anchor
-    and cannot support downstream financial modelling.
+    Drop rows where core price metrics are missing.
     """
-    if "current_price_usd" not in wide_df.columns:
-        print("  No current_price_usd column — no rows dropped")
+    needed = {"close_price"}
+    available = needed.intersection(wide_df.columns)
+    if not available:
+        print("  No close_price column - no rows dropped")
         return wide_df
     before = wide_df.count()
-    cleaned = wide_df.filter(F.col("current_price_usd").isNotNull())
+    cleaned = wide_df
+    for col_name in available:
+        cleaned = cleaned.filter(F.col(col_name).isNotNull())
     after = cleaned.count()
-    print(f"  Dropped {before - after:,} rows missing price  ({after:,} remain)")
+    print(f"  Dropped {before - after:,} rows missing prices ({after:,} remain)")
     return cleaned
+
+
+def drop_missing_email_score(wide_df: DataFrame) -> DataFrame:
+    """Backward-compatible alias for older callers."""
+    return drop_missing_price(wide_df)
 
 
 def drop_missing_gdp_hdi(wide_df: DataFrame) -> DataFrame:
@@ -389,13 +430,13 @@ def transform(
     1. Extract sources via extract.py (pandas)
     2. Convert each to a Spark DataFrame
     3. Union into one long Spark DF
-    4. Pivot to wide Spark DF (one row per asset + year)
-    5. Drop rows missing a price anchor
+    4. Pivot to wide Spark DF (one row per ticker + year)
+    5. Drop rows missing core price metrics
 
     Args:
-        include_realtime: fetch live RapidAPI finance data (default True).
-        include_legacy:   also load static CSV files (WGI, IMF, HDI, etc.).
-        include_api:      also fetch live World Bank data.
+        include_realtime: fetch Finnhub stock data (default True).
+        include_legacy:   kept for CLI compatibility; ignored by active extractor.
+        include_api:      kept for CLI compatibility; ignored by active extractor.
 
     Returns:
         (long_df, wide_df) — both are Spark DataFrames, wide_df is cleaned.
@@ -421,7 +462,7 @@ def transform(
         print("\n=== Normalise country names ===")
         long_df = normalize_country_names(long_df)
 
-    print("\n=== Pivot wide (merge on asset + year) ===")
+    print("\n=== Pivot wide (merge on ticker + year) ===")
     wide_df = pivot_wide(long_df)
 
     print("\n=== Clean ===")

@@ -1,5 +1,5 @@
 """
-Quick test for real-time finance API integration.
+Quick test for Finnhub integration.
 
 Usage:
     python test_realtime.py
@@ -8,15 +8,15 @@ Usage:
 from dotenv import load_dotenv
 load_dotenv()
 
-from etl.extract import extract_realtime_finance
+from etl.extract import extract_stock_prices
 
 if __name__ == "__main__":
-    print("Fetching real-time finance data...")
-    df = extract_realtime_finance(symbols=["AAPL", "GOOGL", "BTC-USD"])
+    print("Fetching Finnhub stock price data...")
+    df = extract_stock_prices(symbols=["AAPL", "MSFT", "NVDA"], history_years=2)
 
     if len(df) > 0:
-        print(f"\n✓ Success! Got {len(df)} data points")
+        print(f"\nSuccess! Got {len(df)} data points")
         print("\nSample data:")
         print(df.head(10))
     else:
-        print("\n✗ No data returned. Check that RAPIDAPI_KEY is set in .env")
+        print("\nNo data returned. Check that FINNHUB_API_KEY is set in .env")

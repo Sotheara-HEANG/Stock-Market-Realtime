@@ -1,45 +1,5 @@
 services:
 
-  # ── Zookeeper (required by Kafka) ─────────────────────────────────────────
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    container_name: econ_zookeeper
-    restart: unless-stopped
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
-    healthcheck:
-      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ── Kafka Broker ──────────────────────────────────────────────────────────
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    container_name: econ_kafka
-    restart: unless-stopped
-    depends_on:
-      zookeeper:
-        condition: service_healthy
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-    ports:
-      - "9092:9092"
-    healthcheck:
-      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-
   # ── PostgreSQL ────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
@@ -47,23 +7,17 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB:       econ_pipeline
-      POSTGRES_USER:     kongsattha
+      POSTGRES_USER:     ${DB_USER:-Chungheang}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
-      - ./03_warehouse/bronze/schema.sql:/docker-entrypoint-initdb.d/02_bronze.sql
-      - ./03_warehouse/silver/schema.sql:/docker-entrypoint-initdb.d/03_silver.sql
-      - ./03_warehouse/gold/schema.sql:/docker-entrypoint-initdb.d/04_gold_schema.sql
-      - ./03_warehouse/gold/dim_time.sql:/docker-entrypoint-initdb.d/05_dim_time.sql
-      - ./03_warehouse/gold/dim_country.sql:/docker-entrypoint-initdb.d/06_dim_country.sql
-      - ./03_warehouse/gold/dim_indicator.sql:/docker-entrypoint-initdb.d/07_dim_indicator.sql
-      - ./03_warehouse/gold/fact_indicators.sql:/docker-entrypoint-initdb.d/08_fact_indicators.sql
-      - ./03_warehouse/gold/fact_predictions.sql:/docker-entrypoint-initdb.d/09_fact_predictions.sql
+      - ./03_warehouse/bronze/schema.sql:/docker-entrypoint-initdb.d/01_bronze.sql
+      - ./03_warehouse/silver/schema.sql:/docker-entrypoint-initdb.d/02_silver.sql
+      - ./03_warehouse/gold/schema.sql:/docker-entrypoint-initdb.d/03_gold.sql
     ports:
-      - "5432:5432"
+      - "55432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kongsattha -d econ_pipeline"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-Chungheang} -d econ_pipeline"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -78,34 +32,11 @@ services:
         condition: service_healthy
     command: >
       bash -c "pip install mlflow psycopg2-binary --quiet &&
-               mlflow server
-                 --backend-store-uri postgresql+psycopg2://kongsattha:${DB_PASSWORD:-}@postgres:5432/econ_pipeline
-                 --default-artifact-root /mlflow-artifacts
-                 --host 0.0.0.0
-                 --port 5001"
+               mlflow server --backend-store-uri postgresql+psycopg2://${DB_USER:-Chungheang}:${DB_PASSWORD:-}@postgres:5432/econ_pipeline --default-artifact-root /mlflow-artifacts --host 0.0.0.0 --port 5001"
     volumes:
       - mlflow_artifacts:/mlflow-artifacts
     ports:
       - "5001:5001"
-
-  # ── Oracle Database (Free Edition) ───────────────────────────────────────
-  oracle:
-    image: container-registry.oracle.com/database/free:latest-lite
-    container_name: econ_oracle
-    restart: unless-stopped
-    environment:
-      ORACLE_PWD: ${ORA_PASSWORD:-YourPassword123}
-      ORACLE_CHARACTERSET: AL32UTF8
-    ports:
-      - "1521:1521"
-    volumes:
-      - oracle_data:/opt/oracle/oradata
-    healthcheck:
-      test: ["CMD-SHELL", "healthcheck.sh"]
-      interval: 30s
-      timeout: 10s
-      retries: 20
-      start_period: 120s
 
   # ── ETL Pipeline (one-shot) ───────────────────────────────────────────────
   pipeline:
@@ -114,19 +45,16 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
     environment:
       DB_HOST:                 postgres
       DB_PORT:                 5432
       DB_NAME:                 econ_pipeline
-      DB_USER:                 kongsattha
+      DB_USER:                 ${DB_USER:-Chungheang}
       DB_PASSWORD:             ${DB_PASSWORD:-}
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-    volumes:
-      - ./data:/app/data
-      - ./Dataset:/app/Dataset
-      - ./logs:/app/logs
+      JAVA_HOME:               ${CONTAINER_JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-arm64}
+      FINNHUB_API_KEY:         ${FINNHUB_API_KEY:-}
+      FINNHUB_SYMBOLS:         ${FINNHUB_SYMBOLS:-AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM}
+      FINNHUB_HISTORY_YEARS:   ${FINNHUB_HISTORY_YEARS:-5}
     profiles: ["run"]
 
   # ── FastAPI Backend ───────────────────────────────────────────────────────
@@ -142,8 +70,12 @@ services:
       DB_HOST:     postgres
       DB_PORT:     5432
       DB_NAME:     econ_pipeline
-      DB_USER:     kongsattha
+      DB_USER:     ${DB_USER:-Chungheang}
       DB_PASSWORD: ${DB_PASSWORD:-}
+      JAVA_HOME:   ${CONTAINER_JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-arm64}
+      FINNHUB_API_KEY:         ${FINNHUB_API_KEY:-}
+      FINNHUB_SYMBOLS:         ${FINNHUB_SYMBOLS:-AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM}
+      FINNHUB_HISTORY_YEARS:   ${FINNHUB_HISTORY_YEARS:-5}
     volumes:
       - .:/app
     ports:
@@ -163,8 +95,12 @@ services:
       DB_HOST:     postgres
       DB_PORT:     5432
       DB_NAME:     econ_pipeline
-      DB_USER:     kongsattha
+      DB_USER:     ${DB_USER:-Chungheang}
       DB_PASSWORD: ${DB_PASSWORD:-}
+      JAVA_HOME:   ${CONTAINER_JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-arm64}
+      FINNHUB_API_KEY:         ${FINNHUB_API_KEY:-}
+      FINNHUB_SYMBOLS:         ${FINNHUB_SYMBOLS:-AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM}
+      FINNHUB_HISTORY_YEARS:   ${FINNHUB_HISTORY_YEARS:-5}
     volumes:
       - .:/app
     ports:
@@ -174,4 +110,3 @@ services:
 volumes:
   postgres_data:
   mlflow_artifacts:
-  oracle_data:

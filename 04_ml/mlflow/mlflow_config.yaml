@@ -1,10 +1,10 @@
 mlflow:
   tracking_uri: "mlruns"            # local file-based tracking (no server needed)
-  experiment_name: "finance-price-forecasting"
-  artifact_location: "mlruns/artifacts"
+  experiment_name: "finnhub-stock-forecasting"
+  artifact_location: "mlartifacts/finnhub-stock-forecasting"
 
   default_tags:
-    project: "real-time-finance-pipeline"
+    project: "finnhub-trading-pipeline"
     team: "data-engineering"
 
 models:
@@ -23,10 +23,11 @@ models:
       optimized: true
 
 indicators:
-  - current_price_usd
-  - price_change_pct
-  - trading_volume
-  - intraday_range_pct
+  - open_price
+  - high_price
+  - low_price
+  - close_price
+  - latest_price
 
 training:
   min_observations: 3
