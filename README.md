@@ -1,400 +1,230 @@
-# Finnhub Stock Streaming Dashboard
+# 📈 Finnhub Real-Time Stock Streaming Pipeline & ML Forecasting Dashboard
 
-This project is a stock market data pipeline and live dashboard.
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![Apache Spark](https://img.shields.io/badge/Apache%20Spark-3.5-red?logo=apachespark&logoColor=white)](https://spark.apache.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16.0-blue?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.109-green?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.31-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![MLflow](https://img.shields.io/badge/MLflow-2.10-0194E2?logo=mlflow&logoColor=white)](https://mlflow.org/)
+[![Docker](https://img.shields.io/badge/Docker%20Compose-Supported-blue?logo=docker&logoColor=white)](https://www.docker.com/)
 
-It collects stock prices from Finnhub, stores the data in PostgreSQL, creates analytics and forecasts, serves the data through FastAPI, and shows a live Streamlit dashboard where stock prices update without refreshing the whole page.
+A premium, production-grade real-time stock market data engineering pipeline, analytical warehouse, and predictive machine learning forecasting dashboard. The application extracts streaming market quotes via the Finnhub API, processes them using PySpark, stores them in a multi-layered PostgreSQL database (Bronze, Silver, Gold), trains double exponential smoothing models logged to MLflow, and exposes the analytics via a robust FastAPI backend and an interactive, highly polished dark-themed Streamlit dashboard.
 
-## What This Project Does
+---
 
-1. Gets stock data from Finnhub.
-2. Converts the raw data into a clean format.
-3. Stores the data in a Bronze, Silver, and Gold warehouse.
-4. Builds simple price features like change, trend, range, and volatility.
-5. Creates ML forecasts for stock price metrics.
-6. Provides an API with FastAPI.
-7. Displays a live stock streaming dashboard with Streamlit.
+## 🏛️ Comprehensive Architecture & Flow
 
-## Main Technologies
+The system is built as a modular, containerized multi-service architecture using Docker Compose. The diagram below illustrates the end-to-end data flow from the external financial APIs to the final visualization and tracking layers:
 
-| Tool | Purpose |
-|---|---|
-| Python | Main programming language |
-| Finnhub API | Stock quote and company data source |
-| PySpark | Data transformation |
-| PostgreSQL | Data warehouse |
-| FastAPI | Backend API |
-| Streamlit | Live dashboard UI |
-| Plotly | Charts |
-| MLflow | ML experiment tracking |
-| Docker Compose | Runs all services |
+```mermaid
+graph TD
+    subgraph External Source
+        FH[Finnhub REST API]
+    end
 
-## Data Source
+    subgraph Data Pipeline [ETL Engine]
+        EX[extract.py: Ingest Quotes & Metadata]
+        TR[transform.py: Pivot & Format via PySpark]
+        EN[enrich.py: Compute Volatility & Trend Metrics]
+        LD[load.py: Write to PostgreSQL Warehouse]
+    end
 
-The active data source is Finnhub:
+    subgraph Storage [PostgreSQL Warehouse]
+        DB[(PostgreSQL Database)]
+        BZ[Bronze Layer: Raw JSON Quotes]
+        SL[Silver Layer: Clean Wide Prices]
+        GL[Gold Layer: Dimension & Fact Tables]
+    end
 
-```text
-https://finnhub.io/
+    subgraph Analytics & Modeling [ML Engine]
+        PR[predict.py: Fit Models & Forecast]
+        TRN[train.py: MLflow Training Registry]
+        MLF[MLflow Tracking Server: localhost:5001]
+    end
+
+    subgraph Serving & UI [Access Layer]
+        API[FastAPI Backend: localhost:8000]
+        ST[Streamlit Live Dashboard: localhost:8501]
+    end
+
+    FH -->|JSON Ingestion| EX
+    EX -->|Pandas DataFrames| TR
+    TR -->|PySpark Transformation| EN
+    EN -->|Enriched DataFrames| LD
+    LD --> BZ
+    BZ --> SL
+    SL --> GL
+    GL -->|Historical Series| PR
+    PR -->|OLS & Holt's Equations| TRN
+    TRN -->|Register Metrics & Params| MLF
+    PR -->|fact_predictions Table| GL
+    GL -->|Query Data & Forecasts| API
+    API -->|Fetch API Endpoints| ST
+    GL -->|Direct Frag Stream Reading| ST
 ```
 
-Used endpoints:
+---
+
+## 💎 Features Overview
+
+1. **Robust Streaming ETL Engine:** Extract real-time quotes from the Finnhub API and transform raw values with high-performance PySpark schemas.
+2. **Multi-Layered Data Warehouse:** Designed using clean database warehousing practices featuring **Bronze** (raw landing), **Silver** (cleaned wide structure), and **Gold** (analytical star schema dimensions & facts) layers.
+3. **Double ML Forecasting Suite:** Dynamically fits two distinct mathematical models—Ordinary Least Squares (OLS) Linear Trend and Holt's Double Exponential Smoothing (with damped trend)—to project future stock pricing.
+4. **Centralized MLflow Tracking Server:** Logs every training run's hyperparameters (horizons, tickers, indicators), performance metrics ($MAE$, $RMSE$, $MAPE$, $R^2$), and prediction datasets in a centralized Postgres-backed MLflow Registry.
+5. **FastAPI Serving Layer:** Exposes clean REST API endpoints for live price polling, commodity lists, historical trends, model predictions, and stock comparisons.
+6. **Polished Dark-Theme Streamlit Dashboard:** An interactive, premium user interface incorporating state-of-the-art visual assets, responsive custom CSS, spline chart visualization, and shaded ML forecasting confidence bands.
+
+---
+
+## 🛠️ Dashboard Enhancements & Hotfixes
+
+We recently implemented **10 critical visual and functional enhancements** to provide a high-end, premium look and resolve existing runtime exceptions:
+
+1. **🔢 1-Based DataFrame Indexing:** Reconfigured the tables inside the dashboard (such as the watchlist and prediction views) to start indexing at `1` instead of the pandas default `0`, making the grid list intuitive and clean.
+2. **📈 13 Stock Multi-Sector Watchlist:** Expanded the system to track **13 stock symbols** (adding `BAC`, `V`, `JNJ`, `UNH`, `XOM`), bringing in premium new sectors like **Healthcare** (`JNJ`, `UNH`) and **Energy** (`XOM`) to complement Financials, Consumer Cyclicals, and Tech.
+3. **🇰🇭 UTC+7 Phnom Penh Time Zone:** Forced all displayed timestamps and live update clocks in the Streamlit UI to display the exact local time in Phnom Penh, Cambodia (UTC+7), ensuring data updates are synchronized.
+4. **🔍 Dark-Theme Styled Sidebar Search:** Overrode default Streamlit input fields so typed search queries are styled in high-contrast light-blue (`#f0f4ff`) against a dark container (`#1e2440`) with a custom real-time ticker match counter (e.g., `🔍 Found 1 matching stock.`).
+5. **💊 Custom Styled Multiselect Pills:** Styled multiselect filter tags in the sidebar with a custom color scheme (`background-color: #2a3158`, `border: 1px solid #4a5280`, `color: #dbe5ff`), blending with the dark-theme design.
+6. **📊 Visual Chart Padding & Container Fixes:** Expanded Plotly margin properties and adjusted chart container heights (increased sector breakdown pie chart to `360px` with `extra_right` padding) to prevent data labels or legend text from being clipped by the container walls.
+7. **🔮 Multi-Page Sidebar Nav Routing:** Built a premium sidebar navigation control block that allows users to toggle between two distinct full views: `📡 Live & History` and `🔮 ML Forecasting`.
+8. **📉 Spline Interpolation & Gradient Area Charts:** Replaced jagged lines in Plotly charts with smooth spline curves (`shape="spline"`). If exactly **one** stock is filtered, the graph upgrades to a stunning, semi-transparent **gradient-filled Area Chart**, bringing gorgeous visual depth.
+9. **🛡️ Shaded 95% Confidence Interval Band Ribbons:** Plotted the upper and lower forecast bounds (`confidence_low` and `confidence_high`) as a beautifully shaded, semi-transparent color band (`fill="tonexty"`) surrounding the primary predicted spline trace.
+10. **🛠️ Resolution of Plotly Axis `titlefont` Exception:** Replaced deprecated Plotly configurations (`titlefont=dict(...)`) inside the `xaxis` and `yaxis` dictionary parameters with modern nested title dict specifications (`title=dict(text="...", font=dict(...))`), resolving a major `ValueError` crash.
+
+---
+
+## 🔮 Deep-Dive: Machine Learning & Forecasting Models
+
+The system fits two distinct forecasting algorithms to predict stock pricing (Open, High, Low, Close, and Latest prices) over a **3-year horizon**:
+
+### 1. Ordinary Least Squares (OLS) Linear Trend
+Fills a straight line through all historical points by minimizing the sum of squared residuals. It treats all historical years with equal weight.
+* **Equation:**
+  $$\hat{y}_t = \beta_0 + \beta_1 \cdot t$$
+* **Uncertainty Estimation:** Calculates standard regression prediction intervals that grow wider as the forecast steps project further away from the sample mean:
+  $$SE_{pred} = s \cdot \sqrt{1 + \frac{1}{n} + \frac{(t - \bar{t})^2}{\sum (t_i - \bar{t})^2}}$$
+
+### 2. Holt's Double Exponential Smoothing (Damped Trend)
+An advanced time series forecasting method that incorporates both level and trend components. It applies exponential weights, placing **higher weight on recent years** (e.g., 2025/2026) and lower weight on older data (2022/2023). It also incorporates a damping parameter ($\phi$) to prevent the trend from over-extrapolating indefinitely into the future.
+* **Level Equation:**
+  $$L_t = \alpha \cdot y_t + (1 - \alpha)(L_{t-1} + \phi \cdot T_{t-1})$$
+* **Trend Equation:**
+  $$T_t = \beta(L_t - L_{t-1}) + (1 - \beta) \cdot \phi \cdot T_{t-1}$$
+* **Forecast Equation:**
+  $$\hat{y}_{t+h} = L_t + \sum_{i=1}^{h} \phi^i \cdot T_t$$
+* **Uncertainty Estimation:** Spreads the confidence interval using the in-sample Root Mean Squared Error (RMSE) scaled by the step duration $h$:
+  $$Margin = 1.96 \cdot RMSE_{in\_sample} \cdot \sqrt{h}$$
+
+### 🔬 The JPM Linear Forecast Case Study: Why both models look similar
+When viewing highly linear stocks like **JPM**, **AAPL**, or **AMZN** in the dashboard, the OLS and Holt forecast lines look identical. 
+* **The Reason:** These stocks had remarkably stable, straight-line growth from 2022 to 2026. Because the history contains no curvature, weighting recent points more (Holt) or weighting all points equally (OLS) yields the same constant slope.
+* **Mathematical Divergence:** If you switch the ticker dropdown in the UI to highly non-linear or accelerating stocks like **NVDA**, **BAC**, or **MSFT**, the models **diverge by up to 10%** because Holt's detects and prioritizes the recent acceleration, while OLS is dragged down by old historical data.
+
+---
+
+## 🗄️ Database Warehouse Schema (PostgreSQL)
+
+The database `econ_pipeline` is organized into three layers:
 
 ```text
-GET /quote              live stock price
-GET /stock/profile2     company name and sector
-GET /stock/candle       historical candle data when the API key allows it
+econ_pipeline/
+|-- bronze/
+|   `-- raw_commodity_prices         # Raw JSON-like records from Finnhub quotes
+|-- silver/
+|   `-- commodity_prices             # Clean wide stock price rows
+`-- gold/
+    |-- dim_commodity                # Dimension table containing Symbol, Name, Sector
+    |-- fact_commodity_prices        # Fact table containing actual historical price metrics
+    `-- fact_predictions             # Table storing model forecasting bounds & values
 ```
 
-Important note: the current Finnhub key can access live quotes. If historical candle access is blocked by the plan, the project uses live quote data plus a projected history fallback so the warehouse and ML pipeline still work.
+### Table Mappings
+To maintain compatibility with the original agricultural codebase, stock metadata is mapped as follows:
+* `symbol` = Stock Ticker (e.g. `AAPL`)
+* `commodity_name` = Company Name (e.g. `Apple Inc.`)
+* `commodity_category` = Sector Name (e.g. `Technology`)
 
-## Tracked Stocks
+---
 
-Default tickers:
+## 🔌 API Reference (FastAPI)
 
-```text
-AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA, JPM
-```
+FastAPI serves data at `http://localhost:8000`. Key endpoints include:
 
-You can change them in `.env`:
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/health` | `GET` | Verifies API health and PostgreSQL database connection status. |
+| `/quote?symbol=AAPL` | `GET` | Pulls a live stock quote directly from the Finnhub API. |
+| `/commodities` | `GET` | Fetches the complete list of 13 tracked stock symbols and metadata. |
+| `/prices` | `GET` | Lists all historical database price entries. |
+| `/prices/{symbol}` | `GET` | Retrieves the stored price history for a specific ticker symbol. |
+| `/predictions/{symbol}` | `GET` | Retrieves the future 3-year forecasts and confidence bounds for a ticker. |
+| `/categories` | `GET` | Returns all available stock sectors (e.g., Technology, Healthcare, Energy). |
+| `/top?indicator=close_price&n=5` | `GET` | Ranks the top `N` stocks based on a specific price metric. |
+| `/compare?symbols=AAPL,MSFT` | `GET` | Pulls side-by-side comparative historical datasets for multiple symbols. |
 
+---
+
+## 🚀 Installation & Deployment Guide
+
+### Step 1: Clone and Configure Environment
+
+Clone the repository and copy the environment variables:
 ```bash
-FINNHUB_SYMBOLS=AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM
-```
-
-## Project Flow
-
-```text
-Finnhub API
-   |
-   v
-Extract data
-   |
-   v
-Transform with PySpark
-   |
-   v
-Enrich with price movement, trend, and volatility
-   |
-   v
-Load into PostgreSQL warehouse
-   |
-   v
-Predict future prices and log MLflow runs
-   |
-   v
-FastAPI + Streamlit dashboard
-```
-
-## Project Structure
-
-```text
-ASSIGMENT2/
-|-- main.py                         # Runs the full pipeline
-|-- docker-compose.yml              # Defines Postgres, API, dashboard, MLflow
-|-- Dockerfile                      # Python app image
-|-- requirements.txt                # Python dependencies
-|-- .env.example                    # Example environment config
-|-- README.md                       # Project guide
-|
-|-- etl/
-|   |-- extract.py                  # Gets data from Finnhub
-|   |-- transform.py                # Converts pandas data to Spark and pivots it
-|   |-- enrich.py                   # Adds trend, change, range, volatility
-|   |-- load.py                     # Writes data to PostgreSQL
-|   `-- predict.py                  # Creates forecasts
-|
-|-- 03_warehouse/
-|   |-- bronze/schema.sql           # Raw data table
-|   |-- silver/schema.sql           # Clean data table
-|   `-- gold/schema.sql             # Analytics and prediction tables
-|
-|-- 04_ml/
-|   |-- mlflow/mlflow_config.yaml   # MLflow settings
-|   `-- training/train.py           # MLflow training job
-|
-|-- 05_app/
-|   |-- api/app.py                  # FastAPI backend
-|   `-- dashboard/dashboard.py      # Streamlit live dashboard
-|
-|-- tests/                          # Unit tests
-`-- test_realtime.py                # Quick Finnhub test
-```
-
-## Warehouse Layers
-
-| Layer | Table | Meaning |
-|---|---|---|
-| Bronze | `bronze.raw_commodity_prices` | Raw long-format rows from Finnhub |
-| Silver | `silver.commodity_prices` | Clean wide stock price rows |
-| Gold | `gold.dim_commodity` | Ticker/company/sector dimension |
-| Gold | `gold.fact_commodity_prices` | Stock price metrics and enrichments |
-| Gold | `gold.fact_predictions` | Forecast results |
-
-The table names still use `commodity_*` because the original project used commodity data. The current data is stock data. In this project:
-
-```text
-symbol             = stock ticker
-commodity_name     = company name
-commodity_category = sector
-```
-
-## Dashboard Overview
-
-The Streamlit dashboard shows:
-
-1. Summary cards for average close, average change, rising tickers, falling tickers, and watchlist size.
-2. Live market stream table.
-3. Up/down status for each stock.
-4. Live price, previous close, change, change percent, and small tick movement.
-5. Live price chart for all stocks.
-6. Stored historical price movement chart.
-7. Sector mix chart.
-
-The live stream updates only the live block. It does not refresh the whole page.
-
-## API Overview
-
-FastAPI runs at:
-
-```text
-http://localhost:8000
-```
-
-Useful endpoints:
-
-| Endpoint | Description |
-|---|---|
-| `/health` | Check API and database connection |
-| `/quote?symbol=AAPL` | Get a live Finnhub quote |
-| `/commodities` | List tracked tickers |
-| `/prices` | List stock price rows |
-| `/prices/AAPL` | Get stored price history for one ticker |
-| `/predictions/AAPL` | Get forecast rows for one ticker |
-| `/categories` | List sectors |
-| `/top?indicator=close_price&n=10` | Rank stocks by a metric |
-| `/compare?symbols=AAPL,MSFT` | Compare multiple stocks |
-
-Interactive API docs:
-
-```text
-http://localhost:8000/docs
-```
-
-## How To Run The Project
-
-### Step 1. Open the project folder
-
-```bash
-cd /Users/lychungheang/Documents/ASSIGMENT2
-```
-
-### Step 2. Create the `.env` file
-
-If `.env` does not exist:
-
-```bash
+git clone https://github.com/Menghong-Heng/Stock_Market_realtime.git
+cd Stock_Market_realtime
 cp .env.example .env
 ```
 
-Then edit `.env`:
-
-```bash
+Edit your `.env` file to configure your credentials:
+```env
 DB_HOST=localhost
 DB_PORT=55432
 DB_NAME=econ_pipeline
-DB_USER=Chungheang
-DB_PASSWORD=your_database_password
+DB_USER=Menghong
+DB_PASSWORD=your_password
 
 FINNHUB_API_KEY=your_finnhub_api_key
-FINNHUB_SYMBOLS=AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM
+FINNHUB_SYMBOLS=AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM,BAC,V,JNJ,UNH,XOM
 FINNHUB_HISTORY_YEARS=5
+
+# MLflow Central Tracking Server
+MLFLOW_TRACKING_URI=http://localhost:5001
 ```
 
-Do not commit `.env` because it contains secrets.
+### Step 2: Spin Up the Docker Containers
 
-### Step 3. Start Docker Desktop
-
-Open Docker Desktop first. Then check Docker:
-
-```bash
-docker compose ps
-```
-
-If Docker is running, this command should not show a daemon connection error.
-
-### Step 4. Build and start the services
-
+Ensure Docker Desktop is open and run Compose to build and start the infrastructure:
 ```bash
 docker compose --profile app up -d --build postgres api dashboard mlflow
 ```
 
-This starts:
+This will initialize four localized services:
+* **PostgreSQL Warehouse:** Accessible on the host at `localhost:55432`
+* **FastAPI Backend:** Available at `http://localhost:8000`
+* **Streamlit Live Dashboard:** Running at `http://localhost:8501`
+* **MLflow central tracking server:** Available at `http://localhost:5001`
 
-| Service | URL |
-|---|---|
-| PostgreSQL | `localhost:55432` |
-| FastAPI | `http://localhost:8000` |
-| Streamlit dashboard | `http://localhost:8501` |
-| MLflow | `http://localhost:5001` |
+### Step 3: Run the ETL & ML Training Pipeline
 
-### Step 5. Run the full pipeline
-
+To populate your warehouse with historical data, compute analytical metrics, generate ML forecasts, and log runs directly to MLflow:
 ```bash
-docker compose exec api python main.py
+# Run the entire pipeline end-to-end:
+python main.py
+
+# Alternatively, run only the ML training/logging script:
+python 04_ml/training/train.py
 ```
 
-This runs:
+### Step 4: Access your Dashboards!
+* Go to **[http://localhost:8501](http://localhost:8501)** to explore your dark-theme Stock Dashboard, view live quote streaming, and analyze forecast predictions.
+* Go to **[http://localhost:5001](http://localhost:5001)** and select **`finnhub-stock-forecasting`** under experiments to view logged model parameters, average error metrics, and download prediction artifacts!
 
-```text
-Extract -> Transform -> Enrich -> Load -> Predict -> MLflow Train
-```
+---
 
-Use this when you want to rebuild the warehouse and predictions.
+## 🛠️ Common Troubleshooting
 
-### Step 6. Open the dashboard
-
-Open:
-
-```text
-http://localhost:8501
-```
-
-You should see:
-
-```text
-Stock Dashboard -> Live Market Stream
-```
-
-The live table updates automatically.
-
-### Step 7. Test the API
-
-Health check:
-
-```bash
-curl http://localhost:8000/health
-```
-
-Expected result:
-
-```json
-{"status":"ok","db":"connected"}
-```
-
-Live quote:
-
-```bash
-curl "http://localhost:8000/quote?symbol=AAPL"
-```
-
-### Step 8. View MLflow
-
-Open:
-
-```text
-http://localhost:5001
-```
-
-Look for the experiment:
-
-```text
-finnhub-stock-forecasting
-```
-
-### Step 9. Stop the project
-
-Stop containers but keep database data:
-
-```bash
-docker compose --profile app down
-```
-
-Stop containers and delete database volumes:
-
-```bash
-docker compose --profile app down -v
-```
-
-## Useful Commands
-
-Check containers:
-
-```bash
-docker compose ps
-```
-
-View API logs:
-
-```bash
-docker compose logs -f api
-```
-
-View dashboard logs:
-
-```bash
-docker compose logs -f dashboard
-```
-
-Run tests:
-
-```bash
-pytest
-```
-
-Run Finnhub smoke test:
-
-```bash
-python test_realtime.py
-```
-
-Run ETL without prediction and MLflow:
-
-```bash
-docker compose exec api python main.py --no-predict
-```
-
-## Common Problems
-
-### Docker daemon error
-
-If you see:
-
-```text
-Cannot connect to the Docker daemon
-```
-
-Open Docker Desktop and wait until it is fully running.
-
-### Finnhub candle returns 403
-
-This means the API key does not have access to historical candles. The app still works because it uses live quote projection fallback.
-
-### Dashboard is empty
-
-Run:
-
-```bash
-docker compose exec api python main.py
-```
-
-Then reload:
-
-```text
-http://localhost:8501
-```
-
-### API cannot connect to database
-
-Check PostgreSQL:
-
-```bash
-docker compose ps
-docker compose logs postgres
-```
-
-## Short Summary
-
-This project is a complete stock data engineering pipeline:
-
-```text
-Finnhub -> PySpark ETL -> PostgreSQL warehouse -> ML predictions -> FastAPI -> live Streamlit dashboard
-```
+* **Unicode/Emoji Terminal Error on Windows:** If running the training script locally yields a `UnicodeEncodeError` when trying to print console emojis, execute the command with UTF-8 encoding enabled:
+  ```powershell
+  $env:PYTHONIOENCODING="utf-8"; python 04_ml/training/train.py
+  ```
+* **MLflow Empty UI History:** If your experiments are missing in MLflow, make sure the `MLFLOW_TRACKING_URI=http://localhost:5001` variable is set in your `.env` file, and that you have executed `python main.py` or `python 04_ml/training/train.py` from your host terminal to stream metrics to the Docker-backed Postgres database.

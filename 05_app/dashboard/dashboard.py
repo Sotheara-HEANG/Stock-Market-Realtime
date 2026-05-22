@@ -7,10 +7,12 @@ from __future__ import annotations
 import datetime as dt
 import os
 import sys
+import time
 from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 from dotenv import load_dotenv
@@ -65,7 +67,7 @@ def _table_exists(conn, table_name: str) -> bool:
     ).scalar_one()
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def _load_prices() -> pd.DataFrame:
     engine = _get_engine()
     with engine.connect() as conn:
@@ -165,7 +167,12 @@ def _inject_style() -> None:
         }
         [data-testid="stSidebar"] input,
         [data-testid="stSidebar"] textarea {
-            color: #111827;
+            color: #f0f4ff !important;
+            background-color: #1e2440 !important;
+            border: 1px solid #3a4268 !important;
+        }
+        [data-testid="stSidebar"] input::placeholder {
+            color: #6b7a9e !important;
         }
         [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
             color: #a8b3cf;
@@ -337,6 +344,32 @@ def _inject_style() -> None:
         div[data-testid="stMultiSelect"] {
             color: #f8fbff;
         }
+        /* Multiselect tag pills */
+        [data-testid="stSidebar"] [data-testid="stMultiSelect"] span[data-baseweb="tag"] {
+            background-color: #2a3158 !important;
+            border: 1px solid #4a5280 !important;
+            color: #dbe5ff !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stMultiSelect"] span[data-baseweb="tag"] span {
+            color: #dbe5ff !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stMultiSelect"] span[data-baseweb="tag"] svg {
+            fill: #8f9bb8 !important;
+        }
+        /* Multiselect dropdown background */
+        [data-testid="stSidebar"] [data-testid="stMultiSelect"] > div > div {
+            background-color: #1e2440 !important;
+            border-color: #3a4268 !important;
+        }
+        /* Fix overlapping input box inside multiselect/selectbox */
+        [data-testid="stSidebar"] [data-testid="stMultiSelect"] input,
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] input {
+            background-color: transparent !important;
+            border: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            box-shadow: none !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -376,14 +409,18 @@ def _help_line(text: str) -> None:
     st.markdown(f'<div class="help-line">{text}</div>', unsafe_allow_html=True)
 
 
-def _dark_layout(fig, height: int):
+def _dark_layout(fig, height: int, extra_right: int = 0, extra_bottom: int = 0):
     fig.update_layout(
         height=height,
         paper_bgcolor="#151a2e",
         plot_bgcolor="#151a2e",
         font=dict(color="#dbe5ff"),
-        margin=dict(l=10, r=10, t=44, b=10),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#aeb9d8")),
+        margin=dict(l=10, r=10 + extra_right, t=44, b=10 + extra_bottom),
+        legend=dict(
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#aeb9d8"),
+            itemwidth=30,
+        ),
         title_font=dict(color="#f8fbff", size=15),
         xaxis=dict(gridcolor="#2c3450", zerolinecolor="#2c3450"),
         yaxis=dict(gridcolor="#2c3450", zerolinecolor="#2c3450"),
@@ -391,11 +428,17 @@ def _dark_layout(fig, height: int):
     return fig
 
 
-def _finnhub_quote(symbol: str) -> dict[str, float]:
-    token = os.getenv("FINNHUB_API_KEY") or os.getenv("FINNHUB_TOKEN") or ""
-    if not token:
-        raise RuntimeError("FINNHUB_API_KEY is not set")
+# ── Batched quote cache ─────────────────────────────────────────────────────
+# Fetches all symbols in one burst, caches them for _QUOTE_CACHE_TTL seconds
+# so the 10-30s fragment re-runs never duplicate HTTP calls.
+_QUOTE_CACHE_TTL = 25  # seconds
+_quote_cache: dict[str, dict] = {}      # symbol -> quote dict
+_quote_cache_ts: float = 0.0            # last fetch epoch
+_RATE_LIMIT_DELAY = 0.35                # seconds between Finnhub calls
 
+
+def _finnhub_quote_single(symbol: str, token: str) -> dict[str, float]:
+    """Fetch a single quote from Finnhub (internal, use _finnhub_quotes_batch)."""
     response = requests.get(
         "https://finnhub.io/api/v1/quote",
         params={"symbol": symbol, "token": token},
@@ -414,6 +457,34 @@ def _finnhub_quote(symbol: str) -> dict[str, float]:
     }
 
 
+def _finnhub_quotes_batch(symbols: list[str]) -> dict[str, dict[str, float]]:
+    """Fetch quotes for all symbols, using cache if fresh enough."""
+    global _quote_cache, _quote_cache_ts
+
+    now = time.time()
+    if _quote_cache and (now - _quote_cache_ts) < _QUOTE_CACHE_TTL:
+        # Cache is still fresh — return cached data
+        return _quote_cache
+
+    token = os.getenv("FINNHUB_API_KEY") or os.getenv("FINNHUB_TOKEN") or ""
+    if not token:
+        raise RuntimeError("FINNHUB_API_KEY is not set")
+
+    results: dict[str, dict[str, float]] = {}
+    for sym in symbols:
+        try:
+            results[sym] = _finnhub_quote_single(sym, token)
+        except Exception:
+            pass  # will fall back to warehouse data
+        time.sleep(_RATE_LIMIT_DELAY)  # respect rate limits
+
+    if results:
+        _quote_cache = results
+        _quote_cache_ts = time.time()
+
+    return results
+
+
 def _fallback_quote(row: pd.Series) -> dict[str, float]:
     return {
         "live_price": float(row.get("latest_price") or row.get("close_price") or 0),
@@ -424,32 +495,27 @@ def _fallback_quote(row: pd.Series) -> dict[str, float]:
     }
 
 
-@st.fragment(run_every="10s")
+@st.fragment(run_every="30s")
 def _live_market_stream(latest_df: pd.DataFrame) -> None:
-    _block_title("Live Market Stream")
-    _help_line("Up/down is measured against previous close. The small tick shows movement since the last stream update.")
-    st.markdown(
-        """
-        <div class="legend-row">
-            <span class="legend-pill up">UP = live price above previous close</span>
-            <span class="legend-pill down">DOWN = live price below previous close</span>
-            <span class="legend-pill">Small Tick = change since last poll</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    _block_title("📡 Live Prices")
+    _help_line("Prices update every 30 seconds from Finnhub. Green = price went up · Red = price went down.")
 
     previous_prices = st.session_state.setdefault("live_previous_prices", {})
     history = st.session_state.setdefault("live_stream_history", [])
-    timestamp = dt.datetime.now()
+    # Phnom Penh is UTC+7 (no daylight saving time)
+    timestamp = dt.datetime.now(dt.timezone(dt.timedelta(hours=7)))
     rows: list[dict[str, object]] = []
+
+    # Batch-fetch all quotes at once (cached for 25s)
+    all_symbols = [str(r["symbol"]).upper() for _, r in latest_df.iterrows()]
+    batch_quotes = _finnhub_quotes_batch(all_symbols)
 
     for _, row in latest_df.iterrows():
         symbol = str(row["symbol"]).upper()
-        try:
-            quote = _finnhub_quote(symbol)
+        if symbol in batch_quotes:
+            quote = batch_quotes[symbol]
             source = "Finnhub live"
-        except Exception:
+        else:
             quote = _fallback_quote(row)
             source = "warehouse fallback"
 
@@ -465,92 +531,205 @@ def _live_market_stream(latest_df: pd.DataFrame) -> None:
         tick_status = "up" if tick_change > 0 else "down" if tick_change < 0 else "flat"
 
         rows.append({
-            "Symbol": symbol,
-            "Name": row["commodity_name"],
-            "Live Price": live_price,
-            "Previous Close": previous_close,
-            "Status": direction.upper(),
-            "Change": day_change,
-            "Change %": day_change_pct,
-            "Small Tick": tick_change,
-            "Tick": tick_status.upper(),
-            "High": quote["high"],
-            "Low": quote["low"],
-            "Data": source,
-            "Updated": timestamp.strftime("%H:%M:%S"),
+            "Ticker": symbol,
+            "Company": row["commodity_name"],
+            "Price (USD)": live_price,
+            "Prev Close": previous_close,
+            "vs Close": direction.upper(),
+            "Day Change": day_change,
+            "Day %": day_change_pct,
+            "Since Last Update": tick_change,
+            "Trend": tick_status.upper(),
+            "Source": source,
+            "Last Updated": timestamp.strftime("%H:%M:%S"),
         })
         history.append({
             "time": timestamp,
             "symbol": symbol,
-            "live_price": live_price,
-            "live_move": day_change,
-            "live_move_pct": day_change_pct,
-            "small_tick_move": tick_change,
-            "tick": direction,
+            "price": live_price,
+            "day_change": day_change,
+            "day_change_pct": day_change_pct,
         })
 
     st.session_state["live_stream_history"] = history[-240:]
     live_df = pd.DataFrame(rows)
 
-    up_count = int((live_df["Status"] == "UP").sum())
-    down_count = int((live_df["Status"] == "DOWN").sum())
-    flat_count = int((live_df["Status"] == "FLAT").sum())
+    up_count = int((live_df["vs Close"] == "UP").sum())
+    down_count = int((live_df["vs Close"] == "DOWN").sum())
+    flat_count = int((live_df["vs Close"] == "FLAT").sum())
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Streaming Symbols", len(live_df))
-    c2.metric("Tick Up", up_count)
-    c3.metric("Tick Down", down_count)
-    c4.metric("Flat", flat_count)
+    c1.metric("Stocks Tracked", len(live_df))
+    c2.metric("📈 Going Up", up_count)
+    c3.metric("📉 Going Down", down_count)
+    c4.metric("➡️ Unchanged", flat_count)
 
+    # ── Live price chart ──
     chart_df = pd.DataFrame(st.session_state["live_stream_history"])
     if not chart_df.empty:
         fig = px.line(
             chart_df,
             x="time",
-            y="live_price",
+            y="price",
             color="symbol",
             markers=True,
-            title="All Stocks: Live Price",
+            title="Live Stock Prices (updates every 30s)",
             labels={
                 "time": "Time",
-                "live_price": "Live Price",
+                "price": "Price (USD)",
                 "symbol": "Ticker",
-                "live_move": "Change",
-                "live_move_pct": "Change %",
-                "small_tick_move": "Poll Change",
+                "day_change": "Day Change",
+                "day_change_pct": "Day Change %",
             },
             hover_data={
-                "live_price": ":,.2f",
-                "live_move": ":+,.4f",
-                "live_move_pct": ":+,.4f",
-                "small_tick_move": ":+,.6f",
+                "price": ":,.2f",
+                "day_change": ":+,.2f",
+                "day_change_pct": ":+,.2f",
             },
             color_discrete_sequence=["#21d4fd", "#c84cff", "#ff5bc8", "#7c8cff", "#22e6a8", "#f6b44b"],
         )
-        fig.update_yaxes(range=[200, 700], dtick=100)
         st.plotly_chart(_dark_layout(fig, 310), width="stretch")
 
+    # ── Live price table ──
     display_cols = [
-        "Symbol", "Name", "Live Price", "Status", "Change", "Change %",
-        "Small Tick", "Tick", "Previous Close", "High", "Low", "Updated", "Data",
+        "Ticker", "Company", "Price (USD)", "vs Close", "Day Change", "Day %",
+        "Since Last Update", "Trend", "Prev Close", "Source", "Last Updated",
     ]
+    display_df = live_df[display_cols].copy()
+    display_df.index = range(1, len(display_df) + 1)
     st.dataframe(
-        live_df[display_cols].style
-        .map(_colour_change, subset=["Change", "Change %", "Small Tick"])
-        .map(_tick_colour, subset=["Status", "Tick"])
+        display_df.style
+        .map(_colour_change, subset=["Day Change", "Day %", "Since Last Update"])
+        .map(_tick_colour, subset=["vs Close", "Trend"])
         .format({
-            "Live Price": "{:,.2f}",
-            "Previous Close": "{:,.2f}",
-            "Change": "{:+,.4f}",
-            "Change %": "{:+,.4f}%",
-            "Small Tick": "{:+,.6f}",
-            "High": "{:,.2f}",
-            "Low": "{:,.2f}",
+            "Price (USD)": "${:,.2f}",
+            "Prev Close": "${:,.2f}",
+            "Day Change": "{:+,.2f}",
+            "Day %": "{:+,.2f}%",
+            "Since Last Update": "{:+,.4f}",
         }),
         width="stretch",
         height=360,
     )
 
-    st.caption(f"Updated: {timestamp.strftime('%H:%M:%S')}. Only this live stream block updates.")
+    st.caption(f"⏱ Last updated at {timestamp.strftime('%H:%M:%S')} · Only this section refreshes automatically.")
+
+
+@st.cache_data(ttl=300)
+def _load_predictions() -> pd.DataFrame:
+    engine = _get_engine()
+    with engine.connect() as conn:
+        if not (
+            _table_exists(conn, "gold.dim_commodity")
+            and _table_exists(conn, "gold.fact_predictions")
+        ):
+            return pd.DataFrame()
+
+        return pd.read_sql(text("""
+            SELECT d.symbol,
+                   d.commodity_name,
+                   d.commodity_category,
+                   p.indicator,
+                   p.model_name,
+                   p.predicted_year,
+                   p.predicted_value,
+                   p.confidence_low,
+                   p.confidence_high,
+                   p.run_at
+            FROM   gold.fact_predictions p
+            JOIN   gold.dim_commodity    d ON d.commodity_id = p.commodity_id
+            ORDER  BY d.symbol, p.indicator, p.model_name, p.predicted_year
+        """), conn)
+
+
+def _create_forecast_chart(hist_df: pd.DataFrame, pred_df: pd.DataFrame, ticker: str, indicator: str, model_name: str) -> go.Figure:
+    h_sub = hist_df[hist_df["symbol"] == ticker].sort_values("year")
+    p_sub = pred_df[(pred_df["symbol"] == ticker) & (pred_df["indicator"] == indicator) & (pred_df["model_name"] == model_name)].sort_values("predicted_year")
+
+    fig = go.Figure()
+
+    if h_sub.empty and p_sub.empty:
+        return fig
+
+    ind_label = {
+        "close_price": "Close Price",
+        "open_price": "Open Price",
+        "high_price": "High Price",
+        "low_price": "Low Price",
+        "latest_price": "Latest Price"
+    }.get(indicator, indicator)
+
+    # 1. Plot history
+    if not h_sub.empty:
+        fig.add_trace(go.Scatter(
+            x=h_sub["year"],
+            y=h_sub[indicator],
+            mode="lines+markers",
+            name=f"Historical {ind_label}",
+            line=dict(color="#c84cff", width=3, shape="spline"),
+            marker=dict(size=6),
+            hovertemplate="Year %{x}<br>Price: $%{y:,.2f}<extra>History</extra>"
+        ))
+
+    # 2. Plot predictions
+    if not p_sub.empty:
+        # Transparent lower bound line
+        fig.add_trace(go.Scatter(
+            x=p_sub["predicted_year"],
+            y=p_sub["confidence_low"],
+            mode="lines",
+            line=dict(width=0, shape="spline"),
+            showlegend=False,
+            hovertemplate="Lower Bound: $%{y:,.2f}<extra></extra>"
+        ))
+        
+        # Upper bound line with fill to previous trace
+        fig.add_trace(go.Scatter(
+            x=p_sub["predicted_year"],
+            y=p_sub["confidence_high"],
+            mode="lines",
+            fill="tonexty",
+            fillcolor="rgba(33, 212, 253, 0.12)",
+            line=dict(width=0, shape="spline"),
+            name="95% Confidence Interval",
+            hovertemplate="Upper Bound: $%{y:,.2f}<extra></extra>"
+        ))
+
+        # Main forecast line
+        fig.add_trace(go.Scatter(
+            x=p_sub["predicted_year"],
+            y=p_sub["predicted_value"],
+            mode="lines+markers",
+            name=f"Forecast ({model_name})",
+            line=dict(color="#21d4fd", width=3, dash="dash", shape="spline"),
+            marker=dict(size=7, symbol="diamond"),
+            hovertemplate="Year %{x}<br>Forecast: $%{y:,.2f}<extra>Prediction</extra>"
+        ))
+
+    model_title = "Linear Trend" if model_name == "linear_trend" else "Holt's Smoothing"
+    fig.update_layout(
+        title=f"🔮 {ticker} {ind_label} Forecast using {model_title}",
+        xaxis=dict(
+            title="Year",
+            tickmode="linear",
+            dtick=1,
+            gridcolor="#222b45",
+        ),
+        yaxis=dict(
+            title="Price (USD)",
+            tickformat="$",
+            gridcolor="#222b45",
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        margin=dict(l=20, r=40, t=70, b=20)
+    )
+
+    return fig
 
 
 def main() -> None:
@@ -568,6 +747,11 @@ def main() -> None:
         st.info("Run `python main.py` first to populate the warehouse, then reload.")
         return
 
+    try:
+        pred_df = _load_predictions()
+    except Exception:
+        pred_df = pd.DataFrame()
+
     if df.empty:
         st.warning("Warehouse is empty. Run `python main.py` to ingest Finnhub stock prices.")
         return
@@ -576,106 +760,339 @@ def main() -> None:
     all_categories = sorted(df["commodity_category"].dropna().unique().tolist())
 
     with st.sidebar:
-        st.markdown('<div class="side-title">Stock Dashboard</div>', unsafe_allow_html=True)
-        st.markdown('<div class="side-subtitle">Live quotes from Finnhub</div>', unsafe_allow_html=True)
-        st.markdown('<div class="side-active">Live Market Stream</div>', unsafe_allow_html=True)
-        st.markdown('<div class="side-section">Filters</div>', unsafe_allow_html=True)
-        selected_categories = st.multiselect(
-            "Sectors",
-            all_categories,
-            default=all_categories,
+        st.markdown('<div class="side-title">📊 Stock Dashboard</div>', unsafe_allow_html=True)
+        st.markdown('<div class="side-subtitle">Real-time prices from Finnhub API</div>', unsafe_allow_html=True)
+        
+        # Navigation toggle
+        st.markdown('<div class="side-section">Navigation</div>', unsafe_allow_html=True)
+        selected_view = st.radio(
+            "Select View",
+            ["📡 Live & History", "🔮 ML Forecasting"],
+            label_visibility="collapsed",
+            key="side_view_selector",
         )
-        year_range = st.slider(
-            "History window",
-            min_value=min(all_years),
-            max_value=max(all_years),
-            value=(min(all_years), max(all_years)),
-        )
-        search_text = st.text_input("Ticker search", placeholder="AAPL")
 
-        st.markdown('<div class="side-section">Status</div>', unsafe_allow_html=True)
-        st.caption("The live market table updates automatically without refreshing the full page.")
+        if selected_view == "📡 Live & History":
+            st.markdown('<div class="side-section">Filter Stocks</div>', unsafe_allow_html=True)
+            selected_categories = st.multiselect(
+                "Filter by sector",
+                all_categories,
+                default=all_categories,
+                help="Choose which market sectors to display",
+            )
+            year_range = st.slider(
+                "Date range (year)",
+                min_value=min(all_years),
+                max_value=max(all_years),
+                value=(min(all_years), max(all_years)),
+                help="Filter the historical price charts below",
+            )
+            search_text = st.text_input("Search by ticker or company", placeholder="e.g. AAPL or Apple")
+            if search_text:
+                match_count = df[
+                    df["symbol"].str.contains(search_text, case=False, na=False)
+                    | df["commodity_name"].str.contains(search_text, case=False, na=False)
+                ]["symbol"].nunique()
+                st.caption(f"🔍 Found {match_count} matching stock{'s' if match_count != 1 else ''}.")
 
-    filtered_df = df[
-        df["commodity_category"].isin(selected_categories)
-        & df["year"].between(year_range[0], year_range[1])
-    ].copy()
-    if search_text:
-        filtered_df = filtered_df[
-            filtered_df["symbol"].str.contains(search_text, case=False, na=False)
-            | filtered_df["commodity_name"].str.contains(search_text, case=False, na=False)
+            st.markdown('<div class="side-section">How it works</div>', unsafe_allow_html=True)
+            st.caption("The Live Prices section updates automatically every 30 seconds without refreshing the full page.")
+        else:
+            st.markdown('<div class="side-section">ML Predictions</div>', unsafe_allow_html=True)
+            st.caption("Forecasting models are automatically fit, evaluated, and logged to MLflow via the containerized ML pipeline.")
+
+    if selected_view == "📡 Live & History":
+        filtered_df = df[
+            df["commodity_category"].isin(selected_categories)
+            & df["year"].between(year_range[0], year_range[1])
         ].copy()
+        if search_text:
+            filtered_df = filtered_df[
+                filtered_df["symbol"].str.contains(search_text, case=False, na=False)
+                | filtered_df["commodity_name"].str.contains(search_text, case=False, na=False)
+            ].copy()
 
-    latest_df = _latest_snapshot(filtered_df)
-    if latest_df.empty:
-        st.warning("No tickers match the current filters.")
-        return
+        latest_df = _latest_snapshot(filtered_df)
+        if latest_df.empty:
+            st.warning("No tickers match the current filters.")
+            return
 
-    rising = int((latest_df["price_change_pct"] > 0).sum())
-    falling = int((latest_df["price_change_pct"] < 0).sum())
-    high_vol = int((latest_df["volatility_level"] == "high").sum())
-    avg_close = latest_df["close_price"].mean()
-    avg_change = latest_df["price_change_pct"].mean()
+        rising = int((latest_df["price_change_pct"] > 0).sum())
+        falling = int((latest_df["price_change_pct"] < 0).sum())
+        high_vol = int((latest_df["volatility_level"] == "high").sum())
+        avg_close = latest_df["close_price"].mean()
+        avg_change = latest_df["price_change_pct"].mean()
 
-    st.markdown(
-        """
-        <div class="commodity-header">
-            <h1>Stock Market Dashboard</h1>
-            <p>Live Finnhub quote stream with tick-by-tick increase and decrease tracking.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    top1, top2, top3, top4 = st.columns([1.1, 1.1, 1, 1])
-    with top1:
-        _stat_card("Average Close", f"{avg_close:,.2f}", " USD", "purple")
-    with top2:
-        _stat_card("Average Change", f"{avg_change:,.2f}", "%", "cyan")
-    with top3:
-        _mini_card("Rising Tickers", f"+{rising}", True)
-        _mini_card("Falling Tickers", f"-{falling}", False)
-    with top4:
-        _mini_card("Watchlist", str(len(latest_df)), True)
-        _mini_card("High Volatility", str(high_vol), False)
-
-    _live_market_stream(latest_df)
-
-    bottom_left, bottom_right = st.columns([1.55, 1])
-    with bottom_left:
-        _block_title("Stored Price Movement")
-        line_df = filtered_df.melt(
-            id_vars=["year", "symbol"],
-            value_vars=["close_price", "latest_price"],
-            var_name="metric",
-            value_name="price",
+        st.markdown(
+            """
+            <div class="commodity-header">
+                <h1>📈 Stock Market Dashboard</h1>
+                <p>Track live stock prices, compare trends, and monitor your watchlist — powered by Finnhub.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-        fig = px.line(
-            line_df,
-            x="year",
-            y="price",
-            color="symbol",
-            line_dash="metric",
-            markers=True,
-            title="Warehouse Close and Latest Price by Ticker",
-            labels={"year": "Year", "price": "Price", "symbol": "Ticker"},
-            color_discrete_sequence=["#21d4fd", "#c84cff", "#ff5bc8", "#7c8cff", "#22e6a8", "#f6b44b"],
-        )
-        st.plotly_chart(_dark_layout(fig, 330), width="stretch")
 
-    with bottom_right:
-        _block_title("Sector Mix")
-        sector_counts = latest_df.groupby("commodity_category", as_index=False).agg(count=("symbol", "count"))
-        pie = px.pie(
-            sector_counts,
-            names="commodity_category",
-            values="count",
-            hole=0.62,
-            title="Tickers by Sector",
-            color_discrete_sequence=["#21d4fd", "#c84cff", "#ff5bc8", "#376dff", "#22e6a8"],
+        top1, top2, top3, top4 = st.columns([1.1, 1.1, 1, 1])
+        with top1:
+            _stat_card("Avg Close Price", f"${avg_close:,.2f}", "", "purple")
+        with top2:
+            _stat_card("Avg Daily Change", f"{avg_change:,.2f}", "%", "cyan")
+        with top3:
+            _mini_card("Stocks Going Up", f"+{rising}", True)
+            _mini_card("Stocks Going Down", f"-{falling}", False)
+        with top4:
+            _mini_card("Stocks in Watchlist", str(len(latest_df)), True)
+            _mini_card("High Volatility", str(high_vol), False)
+
+        _live_market_stream(latest_df)
+
+        bottom_left, bottom_right = st.columns([1.55, 1])
+        with bottom_left:
+            _block_title("📊 Price History")
+            _help_line("How stock prices have changed over time. Smooth spline curves make trends easy to follow.")
+            
+            # Select tickers to display (prevents horizontal clutter)
+            all_symbols_in_filters = sorted(filtered_df["symbol"].unique())
+            
+            c_sel1, c_sel2 = st.columns([2.2, 1])
+            with c_sel1:
+                selected_symbols_history = st.multiselect(
+                    "Compare stocks",
+                    options=all_symbols_in_filters,
+                    default=all_symbols_in_filters[:4],
+                    key="history_symbols_multiselect",
+                    help="Select which stocks to compare on the historical price chart below to avoid visual clutter"
+                )
+            with c_sel2:
+                selected_metric = st.selectbox(
+                    "Price Metric",
+                    options=["close_price", "open_price", "high_price", "low_price"],
+                    format_func=lambda x: {
+                        "close_price": "Close Price",
+                        "open_price": "Open Price",
+                        "high_price": "High Price",
+                        "low_price": "Low Price"
+                    }.get(x, x),
+                    help="Select which price point to plot"
+                )
+            
+            history_plot_df = filtered_df[filtered_df["symbol"].isin(selected_symbols_history)].copy()
+
+            if not history_plot_df.empty:
+                fig = go.Figure()
+                
+                is_single = len(selected_symbols_history) == 1
+                metric_label = {
+                    "close_price": "Close Price",
+                    "open_price": "Open Price",
+                    "high_price": "High Price",
+                    "low_price": "Low Price"
+                }.get(selected_metric, selected_metric)
+
+                # Vibrant high-contrast colors matching dark mode
+                CHART_THEMES = [
+                    {"line": "#21d4fd", "fill": "rgba(33, 212, 253, 0.12)"},  # Cyan glow
+                    {"line": "#c84cff", "fill": "rgba(200, 76, 255, 0.12)"},  # Purple glow
+                    {"line": "#ff5bc8", "fill": "rgba(255, 91, 200, 0.12)"},  # Pink glow
+                    {"line": "#7c8cff", "fill": "rgba(124, 140, 255, 0.12)"}, # Blue glow
+                    {"line": "#22e6a8", "fill": "rgba(34, 230, 168, 0.12)"},  # Green glow
+                    {"line": "#f6b44b", "fill": "rgba(246, 180, 75, 0.12)"},  # Orange glow
+                    {"line": "#ff4b4b", "fill": "rgba(255, 75, 75, 0.12)"},   # Red glow
+                    {"line": "#1cdb6d", "fill": "rgba(28, 219, 109, 0.12)"},  # Emerald glow
+                ]
+                
+                for idx, sym in enumerate(selected_symbols_history):
+                    sym_df = history_plot_df[history_plot_df["symbol"] == sym].sort_values("year")
+                    if sym_df.empty:
+                        continue
+                    
+                    theme = CHART_THEMES[idx % len(CHART_THEMES)]
+                    color = theme["line"]
+                    fill_color = theme["fill"]
+                    
+                    if is_single:
+                        fig.add_trace(go.Scatter(
+                            x=sym_df["year"],
+                            y=sym_df[selected_metric],
+                            mode="lines+markers",
+                            name=f"{sym} ({metric_label})",
+                            line=dict(color=color, width=3.5, shape="spline"),
+                            marker=dict(size=8, symbol="circle", line=dict(color="#151a2e", width=1.5)),
+                            fill="tozeroy",
+                            fillcolor=fill_color,
+                            hovertemplate=f"<b>{sym}</b><br>Year: %{{x}}<br>{metric_label}: $%{{y:,.2f}}<extra></extra>"
+                        ))
+                    else:
+                        fig.add_trace(go.Scatter(
+                            x=sym_df["year"],
+                            y=sym_df[selected_metric],
+                            mode="lines+markers",
+                            name=sym,
+                            line=dict(color=color, width=3, shape="spline"),
+                            marker=dict(size=7, symbol="circle", line=dict(color="#151a2e", width=1)),
+                            hovertemplate=f"<b>{sym}</b><br>Year: %{{x}}<br>{metric_label}: $%{{y:,.2f}}<extra></extra>"
+                        ))
+                
+                fig.update_layout(
+                    title=dict(
+                        text=f"📈 Historical {metric_label} Trends",
+                        font=dict(color="#f8fbff", size=16, weight="bold")
+                    ),
+                    xaxis=dict(
+                        title=dict(text="Year", font=dict(color="#aeb9d8")),
+                        tickmode="linear",
+                        dtick=1,
+                        gridcolor="#222b45",
+                        tickfont=dict(color="#aeb9d8")
+                    ),
+                    yaxis=dict(
+                        title=dict(text="Price (USD)", font=dict(color="#aeb9d8")),
+                        tickformat="$",
+                        gridcolor="#222b45",
+                        tickfont=dict(color="#aeb9d8")
+                    ),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.04,
+                        xanchor="right",
+                        x=1,
+                        font=dict(color="#aeb9d8", size=11)
+                    ),
+                    margin=dict(l=15, r=15, t=65, b=15),
+                    hovermode="x unified"
+                )
+                
+                st.plotly_chart(_dark_layout(fig, 330, extra_right=0), width="stretch")
+            else:
+                st.info("Select at least one stock to plot the price history.")
+
+        with bottom_right:
+            _block_title("🏷️ Sector Breakdown")
+            _help_line("How many stocks belong to each market sector.")
+            sector_counts = latest_df.groupby("commodity_category", as_index=False).agg(count=("symbol", "count"))
+            sector_counts = sector_counts.rename(columns={"commodity_category": "Sector"})
+            pie = px.pie(
+                sector_counts,
+                names="Sector",
+                values="count",
+                hole=0.62,
+                title="Stocks by Sector",
+                color_discrete_sequence=["#21d4fd", "#c84cff", "#ff5bc8", "#376dff", "#22e6a8"],
+            )
+            pie.update_traces(textfont_color="#f8fbff")
+            st.plotly_chart(_dark_layout(pie, 360, extra_right=30, extra_bottom=30), width="stretch")
+    else:
+        # ML forecasting page
+        if pred_df.empty:
+            st.warning("No prediction data found in database. Run the pipeline to generate forecasts.")
+            return
+
+        st.markdown(
+            """
+            <div class="commodity-header">
+                <h1>🔮 Machine Learning Price Forecasting</h1>
+                <p>Track advanced predictive analytics driven by Linear Trend and Holt's Exponential Smoothing models — logged via MLflow.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-        pie.update_traces(textfont_color="#f8fbff")
-        st.plotly_chart(_dark_layout(pie, 330), width="stretch")
+
+        # Forecasting controls
+        ctrl1, ctrl2, ctrl3 = st.columns(3)
+        with ctrl1:
+            all_symbols = sorted(pred_df["symbol"].unique())
+            selected_ticker = st.selectbox(
+                "Select Stock Ticker",
+                options=all_symbols,
+                help="Select which stock symbol to analyze forecasts for"
+            )
+        with ctrl2:
+            model_options = sorted(pred_df["model_name"].unique())
+            model_name_map = {
+                "linear_trend": "Linear Trend",
+                "holt_smoothing": "Holt's Exponential Smoothing"
+            }
+            selected_model_raw = st.selectbox(
+                "Select Forecasting Model",
+                options=model_options,
+                format_func=lambda x: model_name_map.get(x, x),
+                help="Choose which algorithm's forecast to display"
+            )
+        with ctrl3:
+            indicator_options = sorted(pred_df["indicator"].unique())
+            indicator_name_map = {
+                "close_price": "Close Price",
+                "open_price": "Open Price",
+                "high_price": "High Price",
+                "low_price": "Low Price",
+                "latest_price": "Latest Price"
+            }
+            selected_indicator = st.selectbox(
+                "Select Target Indicator",
+                options=indicator_options,
+                format_func=lambda x: indicator_name_map.get(x, x),
+                help="Select which price field to forecast"
+            )
+
+        # Load run metadata
+        ticker_preds = pred_df[
+            (pred_df["symbol"] == selected_ticker) & 
+            (pred_df["indicator"] == selected_indicator) & 
+            (pred_df["model_name"] == selected_model_raw)
+        ]
+        
+        f_top1, f_top2 = st.columns(2)
+        if not ticker_preds.empty:
+            run_at_val = pd.to_datetime(ticker_preds["run_at"].iloc[0]).tz_convert("Asia/Phnom_Penh").strftime("%Y-%m-%d %H:%M:%S")
+            with f_top1:
+                _stat_card("Active Forecast Model", model_name_map.get(selected_model_raw, selected_model_raw), f" ({selected_ticker})", "purple")
+            with f_top2:
+                _stat_card("Last Pipeline Run Time", run_at_val, " (Phnom Penh)", "cyan")
+        
+        # Joined visual timeline chart
+        st.markdown('<div class="block-title">📊 Forecast Projections Timeline</div>', unsafe_allow_html=True)
+        st.markdown('<p class="help-line">History line (solid purple) joined seamlessly with forecasting line (dashed cyan) surrounded by a 95% confidence interval shaded glow.</p>', unsafe_allow_html=True)
+        
+        fig = _create_forecast_chart(df, pred_df, selected_ticker, selected_indicator, selected_model_raw)
+        st.plotly_chart(_dark_layout(fig, 380, extra_right=30), width="stretch")
+
+        # Table of forecast values
+        st.markdown('<div class="block-title">📋 Detailed Forecast Values</div>', unsafe_allow_html=True)
+        st.markdown('<p class="help-line">Exact values and confidence boundaries for the projected 3-year horizon. Spread % represents bound uncertainty.</p>', unsafe_allow_html=True)
+        
+        if not ticker_preds.empty:
+            display_preds = ticker_preds[["predicted_year", "predicted_value", "confidence_low", "confidence_high"]].copy()
+            # Convert values to float
+            display_preds["predicted_value"] = display_preds["predicted_value"].astype(float)
+            display_preds["confidence_low"] = display_preds["confidence_low"].astype(float)
+            display_preds["confidence_high"] = display_preds["confidence_high"].astype(float)
+            display_preds["Confidence Spread %"] = (
+                (display_preds["confidence_high"] - display_preds["confidence_low"]) / display_preds["predicted_value"] * 100
+            )
+            
+            # Format columns
+            display_preds = display_preds.rename(columns={
+                "predicted_year": "Projected Year",
+                "predicted_value": "Forecasted Price (USD)",
+                "confidence_low": "Lower Confidence Bound",
+                "confidence_high": "Upper Confidence Bound",
+            })
+            
+            display_preds.index = range(1, len(display_preds) + 1)
+            
+            st.dataframe(
+                display_preds.style.format({
+                    "Forecasted Price (USD)": "${:,.2f}",
+                    "Lower Confidence Bound": "${:,.2f}",
+                    "Upper Confidence Bound": "${:,.2f}",
+                    "Confidence Spread %": "{:,.2f}%",
+                }),
+                width="stretch",
+            )
+        else:
+            st.info("No forecast values available for selected combination.")
 
 
 if __name__ == "__main__":
