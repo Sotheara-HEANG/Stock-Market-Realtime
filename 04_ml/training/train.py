@@ -79,7 +79,7 @@ def _resolve_local_uri(uri: str) -> str:
     if not path.is_absolute():
         path = _PROJECT_ROOT / path
     path.mkdir(parents=True, exist_ok=True)
-    return str(path)
+    return path.as_uri()
 
 
 def _resolve_artifact_location(cfg: dict) -> str:
@@ -92,7 +92,7 @@ def _resolve_artifact_location(cfg: dict) -> str:
     if not path.is_absolute():
         path = _PROJECT_ROOT / path
     path.mkdir(parents=True, exist_ok=True)
-    return str(path)
+    return path.as_uri()
 
 
 def _artifact_location_writable(location: str | None) -> bool:
@@ -170,10 +170,19 @@ def _repair_file_store_experiment(cfg: dict) -> None:
 
 
 def _configure_mlflow(cfg: dict) -> None:
-    tracking_uri = _resolve_local_uri(cfg.get("tracking_uri", "mlruns"))
+    # Use environment variable if specified, otherwise fall back to local config
+    env_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if env_uri:
+        tracking_uri = env_uri
+    else:
+        tracking_uri = _resolve_local_uri(cfg.get("tracking_uri", "mlruns"))
+        
     artifact_location = _resolve_artifact_location(cfg)
     mlflow.set_tracking_uri(tracking_uri)
-    _repair_file_store_experiment(cfg)
+    
+    # Only repair file-based experiment metadata if we are using a local file URI
+    if not env_uri or env_uri.startswith("file:"):
+        _repair_file_store_experiment(cfg)
 
     client = MlflowClient()
     experiment_name = cfg.get("experiment_name", "finnhub-stock-forecasting")

@@ -38,6 +38,11 @@ DEFAULT_SYMBOLS = [
     "META",
     "TSLA",
     "JPM",
+    "BAC",
+    "V",
+    "JNJ",
+    "UNH",
+    "XOM",
 ]
 
 DEFAULT_METADATA = {
@@ -49,6 +54,11 @@ DEFAULT_METADATA = {
     "META": {"name": "Meta Platforms Inc", "category": "Communication Services"},
     "TSLA": {"name": "Tesla Inc", "category": "Consumer Cyclical"},
     "JPM": {"name": "JPMorgan Chase & Co", "category": "Financial Services"},
+    "BAC": {"name": "Bank of America Corp", "category": "Financial Services"},
+    "V": {"name": "Visa Inc", "category": "Financial Services"},
+    "JNJ": {"name": "Johnson & Johnson", "category": "Healthcare"},
+    "UNH": {"name": "UnitedHealth Group Inc", "category": "Healthcare"},
+    "XOM": {"name": "Exxon Mobil Corp", "category": "Energy"},
 }
 
 

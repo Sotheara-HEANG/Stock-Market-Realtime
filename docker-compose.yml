@@ -51,9 +51,9 @@ services:
       DB_NAME:                 econ_pipeline
       DB_USER:                 ${DB_USER:-Chungheang}
       DB_PASSWORD:             ${DB_PASSWORD:-}
-      JAVA_HOME:               ${CONTAINER_JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-arm64}
+      JAVA_HOME:               ${CONTAINER_JAVA_HOME:-/usr/lib/jvm/default-java}
       FINNHUB_API_KEY:         ${FINNHUB_API_KEY:-}
-      FINNHUB_SYMBOLS:         ${FINNHUB_SYMBOLS:-AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM}
+      FINNHUB_SYMBOLS:         ${FINNHUB_SYMBOLS:-AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM,BAC,V,JNJ,UNH,XOM}
       FINNHUB_HISTORY_YEARS:   ${FINNHUB_HISTORY_YEARS:-5}
     profiles: ["run"]
 
@@ -72,9 +72,9 @@ services:
       DB_NAME:     econ_pipeline
       DB_USER:     ${DB_USER:-Chungheang}
       DB_PASSWORD: ${DB_PASSWORD:-}
-      JAVA_HOME:   ${CONTAINER_JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-arm64}
+      JAVA_HOME:   ${CONTAINER_JAVA_HOME:-/usr/lib/jvm/default-java}
       FINNHUB_API_KEY:         ${FINNHUB_API_KEY:-}
-      FINNHUB_SYMBOLS:         ${FINNHUB_SYMBOLS:-AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM}
+      FINNHUB_SYMBOLS:         ${FINNHUB_SYMBOLS:-AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM,BAC,V,JNJ,UNH,XOM}
       FINNHUB_HISTORY_YEARS:   ${FINNHUB_HISTORY_YEARS:-5}
     volumes:
       - .:/app
@@ -97,9 +97,9 @@ services:
       DB_NAME:     econ_pipeline
       DB_USER:     ${DB_USER:-Chungheang}
       DB_PASSWORD: ${DB_PASSWORD:-}
-      JAVA_HOME:   ${CONTAINER_JAVA_HOME:-/usr/lib/jvm/java-17-openjdk-arm64}
+      JAVA_HOME:   ${CONTAINER_JAVA_HOME:-/usr/lib/jvm/default-java}
       FINNHUB_API_KEY:         ${FINNHUB_API_KEY:-}
-      FINNHUB_SYMBOLS:         ${FINNHUB_SYMBOLS:-AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM}
+      FINNHUB_SYMBOLS:         ${FINNHUB_SYMBOLS:-AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM,BAC,V,JNJ,UNH,XOM}
       FINNHUB_HISTORY_YEARS:   ${FINNHUB_HISTORY_YEARS:-5}
     volumes:
       - .:/app
