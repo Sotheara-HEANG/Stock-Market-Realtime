@@ -67,7 +67,7 @@ def _table_exists(conn, table_name: str) -> bool:
     ).scalar_one()
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=5)
 def _load_prices() -> pd.DataFrame:
     engine = _get_engine()
     with engine.connect() as conn:
@@ -604,31 +604,8 @@ def _finnhub_quote_single(symbol: str, token: str) -> dict[str, float]:
 
 
 def _finnhub_quotes_batch(symbols: list[str]) -> dict[str, dict[str, float]]:
-    """Fetch quotes for all symbols, using cache if fresh enough."""
-    global _quote_cache, _quote_cache_ts
-
-    now = time.time()
-    if _quote_cache and (now - _quote_cache_ts) < _QUOTE_CACHE_TTL:
-        # Cache is still fresh — return cached data
-        return _quote_cache
-
-    token = os.getenv("FINNHUB_API_KEY") or os.getenv("FINNHUB_TOKEN") or ""
-    if not token:
-        raise RuntimeError("FINNHUB_API_KEY is not set")
-
-    results: dict[str, dict[str, float]] = {}
-    for sym in symbols:
-        try:
-            results[sym] = _finnhub_quote_single(sym, token)
-        except Exception:
-            pass  # will fall back to warehouse data
-        time.sleep(_RATE_LIMIT_DELAY)  # respect rate limits
-
-    if results:
-        _quote_cache = results
-        _quote_cache_ts = time.time()
-
-    return results
+    """Bypassed live API calls to load instantly from warehouse database."""
+    return {}
 
 
 def _fallback_quote(row: pd.Series) -> dict[str, float]:
@@ -671,7 +648,7 @@ def _live_market_stream(latest_df: pd.DataFrame) -> None:
             source = "Finnhub live"
         else:
             quote = _fallback_quote(row)
-            source = "warehouse fallback"
+            source = "Warehouse DWH"
 
         live_price = quote["live_price"]
         prev_tick = previous_prices.get(symbol)
