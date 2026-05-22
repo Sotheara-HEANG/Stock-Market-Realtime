@@ -370,6 +370,152 @@ def _inject_style() -> None:
             margin: 0 !important;
             box-shadow: none !important;
         }
+
+        /* ── Premium UI Micro-Animations ────────────────────────────────── */
+        @keyframes premiumPopUp {
+            0% {
+                opacity: 0;
+                transform: translateY(14px) scale(0.97);
+                filter: brightness(1.2) blur(1px);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                filter: brightness(1) blur(0);
+            }
+        }
+        @keyframes liveMetricUpdate {
+            0% {
+                opacity: 0.7;
+                transform: scale(0.96);
+                border-color: var(--cyan);
+                box-shadow: 0 0 18px rgba(33, 212, 253, 0.4);
+            }
+            40% {
+                transform: scale(1.025);
+                border-color: var(--purple);
+                box-shadow: 0 0 22px rgba(200, 76, 255, 0.35);
+            }
+            100% {
+                opacity: 1;
+                transform: scale(1);
+                border-color: #29304b;
+                box-shadow: 0 20px 44px rgba(0,0,0,.28);
+            }
+        }
+        @keyframes chartUpdate {
+            0% {
+                opacity: 0.8;
+                transform: scale(0.99);
+                border-color: var(--cyan);
+                box-shadow: 0 0 15px rgba(33, 212, 253, 0.22);
+            }
+            100% {
+                opacity: 1;
+                transform: scale(1);
+                border-color: #29304b;
+                box-shadow: 0 18px 42px rgba(0,0,0,.18);
+            }
+        }
+        @keyframes tableUpdate {
+            0% {
+                opacity: 0.8;
+                transform: translateY(6px);
+                border-color: var(--purple);
+                box-shadow: 0 0 15px rgba(200, 76, 255, 0.22);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0);
+                border-color: #29304b;
+                box-shadow: none;
+            }
+        }
+        @keyframes livePulseDot {
+            0% {
+                transform: scale(0.9);
+                box-shadow: 0 0 0 0 rgba(33, 212, 253, 0.7);
+            }
+            70% {
+                transform: scale(1);
+                box-shadow: 0 0 0 8px rgba(33, 212, 253, 0);
+            }
+            100% {
+                transform: scale(0.9);
+                box-shadow: 0 0 0 0 rgba(33, 212, 253, 0);
+            }
+        }
+
+        /* ── Applying Animations ── */
+        .commodity-header {
+            animation: premiumPopUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+        .stat-card.purple {
+            animation: premiumPopUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation-delay: 0.04s;
+        }
+        .stat-card.cyan {
+            animation: premiumPopUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation-delay: 0.08s;
+        }
+        .stat-card.dark {
+            animation: premiumPopUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation-delay: 0.12s;
+        }
+        .mini-card {
+            animation: premiumPopUp 0.58s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+        .mini-card:nth-of-type(1) { animation-delay: 0.12s; }
+        .mini-card:nth-of-type(2) { animation-delay: 0.16s; }
+
+        /* Form Controls staggered load */
+        div[data-testid="stSelectbox"],
+        div[data-testid="stSlider"],
+        div[data-testid="stRadio"],
+        div[data-testid="stTextInput"],
+        div[data-testid="stMultiSelect"] {
+            animation: premiumPopUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation-delay: 0.18s;
+        }
+
+        /* Live fragments entry & update animations */
+        div[data-testid="stMetric"] {
+            animation: liveMetricUpdate 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        }
+        /* Stagger metric cards updates slightly */
+        div[data-testid="stMetric"]:nth-of-type(1) { animation-delay: 0s; }
+        div[data-testid="stMetric"]:nth-of-type(2) { animation-delay: 0.04s; }
+        div[data-testid="stMetric"]:nth-of-type(3) { animation-delay: 0.08s; }
+        div[data-testid="stMetric"]:nth-of-type(4) { animation-delay: 0.12s; }
+
+        .stPlotlyChart {
+            animation: chartUpdate 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+        [data-testid="stDataFrame"] {
+            animation: tableUpdate 0.62s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+
+        /* Pulse indicator styling */
+        .live-indicator-container {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin: 18px 0 10px;
+        }
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--cyan);
+            border-radius: 50%;
+            display: inline-block;
+            animation: livePulseDot 2s infinite ease-in-out;
+        }
+        .live-title {
+            color: #f8fbff;
+            font-size: 1rem;
+            font-weight: 800;
+            margin: 0;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -497,7 +643,15 @@ def _fallback_quote(row: pd.Series) -> dict[str, float]:
 
 @st.fragment(run_every="30s")
 def _live_market_stream(latest_df: pd.DataFrame) -> None:
-    _block_title("📡 Live Prices")
+    st.markdown(
+        """
+        <div class="live-indicator-container">
+            <span class="live-dot"></span>
+            <span class="live-title">📡 Live Prices</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     _help_line("Prices update every 30 seconds from Finnhub. Green = price went up · Red = price went down.")
 
     previous_prices = st.session_state.setdefault("live_previous_prices", {})
