@@ -30,9 +30,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    environment:
+      MLFLOW_ALLOW_ORIGINS: "*"
     command: >
       bash -c "pip install mlflow psycopg2-binary --quiet &&
-               mlflow server --backend-store-uri postgresql+psycopg2://${DB_USER:-Chungheang}:${DB_PASSWORD:-}@postgres:5432/econ_pipeline --default-artifact-root /mlflow-artifacts --host 0.0.0.0 --port 5001"
+               mlflow server --backend-store-uri postgresql+psycopg2://${DB_USER:-Chungheang}:${DB_PASSWORD:-}@postgres:5432/econ_pipeline --default-artifact-root /mlflow-artifacts --host 0.0.0.0 --port 5001 --allowed-hosts '*'"
     volumes:
       - mlflow_artifacts:/mlflow-artifacts
     ports:
@@ -45,6 +47,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      mlflow:
+        condition: service_started
     environment:
       DB_HOST:                 postgres
       DB_PORT:                 5432
@@ -55,6 +59,9 @@ services:
       FINNHUB_API_KEY:         ${FINNHUB_API_KEY:-}
       FINNHUB_SYMBOLS:         ${FINNHUB_SYMBOLS:-AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM,BAC,V,JNJ,UNH,XOM}
       FINNHUB_HISTORY_YEARS:   ${FINNHUB_HISTORY_YEARS:-5}
+      MLFLOW_TRACKING_URI:     http://mlflow:5001
+    volumes:
+      - .:/app
     profiles: ["run"]
 
   # ── FastAPI Backend ───────────────────────────────────────────────────────

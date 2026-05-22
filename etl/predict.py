@@ -1,9 +1,10 @@
 """
-predict.py - forecast stock price metrics.
+predict.py - forecast stock price metrics for Days, Weeks, Months, and Years timeframes.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 import warnings
 from pathlib import Path
@@ -36,16 +37,16 @@ def _floor_price(value: float) -> float:
 
 
 def _prediction_row(
-    predicted_year: int,
+    predicted_time: dt.date,
     predicted_value: float,
     confidence_low: float,
     confidence_high: float,
-) -> dict[str, float | int]:
+) -> dict[str, float | dt.date]:
     pred = _floor_price(predicted_value)
     low = _floor_price(confidence_low)
     high = _floor_price(confidence_high)
     return {
-        "predicted_year": int(predicted_year),
+        "predicted_time": predicted_time,
         "predicted_value": pred,
         "confidence_low": min(low, pred),
         "confidence_high": max(high, pred),
@@ -66,90 +67,122 @@ def _get_engine():
 def _load_indicators(engine) -> pd.DataFrame:
     """
     Read gold.fact_commodity_prices + gold.dim_commodity and return long format.
-
-    Returned id column is named country_id for compatibility with the existing
-    evaluation utilities.
     """
     metric_cols = ", ".join(f"f.{c}" for c in INDICATORS)
     query = f"""
         SELECT f.commodity_id,
                d.symbol,
-               f.year,
+               f.timeframe,
+               f.time_index,
                {metric_cols}
         FROM   gold.fact_commodity_prices f
         JOIN   gold.dim_commodity         d ON d.commodity_id = f.commodity_id
-        ORDER  BY d.symbol, f.year
+        ORDER  BY d.symbol, f.timeframe, f.time_index
     """
     try:
         wide = pd.read_sql(query, engine)
-    except Exception:
-        return pd.DataFrame(columns=["country_id", "indicator", "year", "value"])
+    except Exception as exc:
+        print(f"  [error] Loading indicators failed: {exc}")
+        return pd.DataFrame(columns=["country_id", "indicator", "timeframe", "time_index", "value"])
 
     numeric_cols = [c for c in INDICATORS if c in wide.columns]
     long = wide.melt(
-        id_vars=["commodity_id", "symbol", "year"],
+        id_vars=["commodity_id", "symbol", "timeframe", "time_index"],
         value_vars=numeric_cols,
         var_name="indicator",
         value_name="value",
     )
-    long["year"] = long["year"].astype(int)
+    long["time_index"] = pd.to_datetime(long["time_index"]).dt.date
     long["value"] = pd.to_numeric(long["value"], errors="coerce")
     return long.rename(columns={"commodity_id": "country_id"})
 
 
-def _linear_trend(years: np.ndarray, values: np.ndarray, forecast_years: np.ndarray) -> pd.DataFrame:
+def _linear_trend(
+    x: np.ndarray,
+    y: np.ndarray,
+    forecast_steps: np.ndarray,
+    forecast_dates: list[dt.date],
+) -> pd.DataFrame:
     """OLS trend extrapolation with approximate 95% prediction intervals."""
-    x = years.astype(float)
-    y = values.astype(float)
     n = len(x)
-
     x_mean = x.mean()
-    beta1 = np.sum((x - x_mean) * (y - y.mean())) / np.sum((x - x_mean) ** 2)
+    denom = np.sum((x - x_mean) ** 2)
+    if denom == 0:
+        beta1 = 0.0
+    else:
+        beta1 = np.sum((x - x_mean) * (y - y.mean())) / denom
     beta0 = y.mean() - beta1 * x_mean
 
     y_hat = beta0 + beta1 * x
     residuals = y - y_hat
-    s2 = np.sum(residuals ** 2) / (n - 2)
-    ssx = np.sum((x - x_mean) ** 2)
+    s2 = np.sum(residuals ** 2) / (n - 2) if n > 2 else 0.0001
+    if s2 <= 0:
+        s2 = 0.0001
+    ssx = denom if denom > 0 else 0.0001
 
     rows = []
-    for fy in forecast_years:
-        pred = beta0 + beta1 * float(fy)
-        se_pred = np.sqrt(s2 * (1 + 1 / n + (float(fy) - x_mean) ** 2 / ssx))
+    for step, fdate in zip(forecast_steps, forecast_dates):
+        pred = beta0 + beta1 * float(step)
+        se_pred = np.sqrt(s2 * (1 + 1 / n + (float(step) - x_mean) ** 2 / ssx))
         margin = 1.96 * se_pred
-        rows.append(_prediction_row(int(fy), pred, pred - margin, pred + margin))
+        rows.append(_prediction_row(fdate, pred, pred - margin, pred + margin))
     return pd.DataFrame(rows)
 
 
-def _holt_smoothing(years: np.ndarray, values: np.ndarray, forecast_years: np.ndarray) -> pd.DataFrame:
+def _holt_smoothing(
+    x: np.ndarray,
+    y: np.ndarray,
+    forecast_steps: np.ndarray,
+    forecast_dates: list[dt.date],
+) -> pd.DataFrame:
     """Holt double exponential smoothing with approximate intervals."""
-    y = values.astype(float)
     model = ExponentialSmoothing(y, trend="add", damped_trend=True)
     result = model.fit(optimized=True)
 
     in_sample_rmse = np.sqrt(np.mean(result.resid ** 2))
-    last_year = int(years[-1])
-    steps_list = [int(fy) - last_year for fy in forecast_years]
-    forecast_vals = result.forecast(max(steps_list))
+    if in_sample_rmse <= 0:
+        in_sample_rmse = 0.01
+    forecast_vals = result.forecast(HORIZON)
 
     rows = []
-    for fy, h in zip(forecast_years, steps_list):
-        pred = float(forecast_vals[h - 1])
-        margin = 1.96 * in_sample_rmse * np.sqrt(h)
-        rows.append(_prediction_row(int(fy), pred, pred - margin, pred + margin))
+    for h, fdate in enumerate(forecast_dates):
+        pred = float(forecast_vals[h])
+        margin = 1.96 * in_sample_rmse * np.sqrt(h + 1)
+        rows.append(_prediction_row(fdate, pred, pred - margin, pred + margin))
     return pd.DataFrame(rows)
 
 
 def _fit_series(
     country_id: int,
+    timeframe: str,
     indicator: str,
     series: pd.DataFrame,
 ) -> list[dict]:
     """Fit both models on one ticker metric series."""
-    years = series["year"].values
+    dates = series["time_index"].values
     values = series["value"].values
-    last_year = int(years[-1])
-    forecast_years = np.array([last_year + h for h in range(1, HORIZON + 1)])
+    n = len(dates)
+    
+    x = np.arange(n)
+    forecast_steps = np.arange(n, n + HORIZON)
+    
+    last_date = dates[-1]
+    forecast_dates = []
+    for step in forecast_steps:
+        offset = int(step - (n - 1))
+        if timeframe == 'day':
+            fdate = last_date + dt.timedelta(days=offset)
+        elif timeframe == 'week':
+            fdate = last_date + dt.timedelta(weeks=offset)
+        elif timeframe == 'month':
+            year = last_date.year + (last_date.month - 1 + offset) // 12
+            month = (last_date.month - 1 + offset) % 12 + 1
+            fdate = dt.date(year, month, 1)
+        elif timeframe == 'year':
+            fdate = dt.date(last_date.year + offset, 1, 1)
+        else:
+            fdate = last_date + dt.timedelta(days=offset)
+        forecast_dates.append(fdate)
 
     rows: list[dict] = []
     models = {
@@ -159,19 +192,20 @@ def _fit_series(
 
     for model_name, fn in models.items():
         try:
-            preds = fn(years, values, forecast_years)
+            preds = fn(x, values, forecast_steps, forecast_dates)
             for _, row in preds.iterrows():
                 rows.append({
                     "country_id": country_id,
+                    "timeframe": timeframe,
                     "indicator": indicator,
                     "model_name": model_name,
-                    "predicted_year": row["predicted_year"],
+                    "predicted_time": row["predicted_time"],
                     "predicted_value": row["predicted_value"],
                     "confidence_low": row["confidence_low"],
                     "confidence_high": row["confidence_high"],
                 })
         except Exception as exc:
-            print(f"    [warn] {model_name} failed for indicator={indicator} commodity_id={country_id}: {exc}")
+            print(f"    [warn] {model_name} failed for indicator={indicator} commodity_id={country_id} timeframe={timeframe}: {exc}")
 
     return rows
 
@@ -195,17 +229,17 @@ def predict(engine=None) -> pd.DataFrame:
 
     print("  [2/4] Fitting models...")
     all_rows: list[dict] = []
-    for (commodity_id, indicator), grp in df.groupby(["country_id", "indicator"]):
+    for (commodity_id, timeframe, indicator), grp in df.groupby(["country_id", "timeframe", "indicator"]):
         series = (
-            grp[["year", "value"]]
+            grp[["time_index", "value"]]
             .dropna(subset=["value"])
-            .sort_values("year")
-            .drop_duplicates(subset=["year"])
+            .sort_values("time_index")
+            .drop_duplicates(subset=["time_index"])
             .reset_index(drop=True)
         )
         if len(series) < MIN_OBS:
             continue
-        all_rows.extend(_fit_series(int(commodity_id), indicator, series))
+        all_rows.extend(_fit_series(int(commodity_id), timeframe, indicator, series))
 
     preds_df = pd.DataFrame(all_rows)
     if preds_df.empty:
@@ -217,21 +251,25 @@ def predict(engine=None) -> pd.DataFrame:
     print("  [3/4] Creating gold.fact_predictions...")
     with engine.begin() as conn:
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS gold"))
+        conn.execute(text("DROP TABLE IF EXISTS gold.fact_predictions CASCADE"))
         conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS gold.fact_predictions (
+            CREATE TABLE gold.fact_predictions (
                 id              SERIAL       PRIMARY KEY,
                 commodity_id    INT          NOT NULL REFERENCES gold.dim_commodity (commodity_id),
+                timeframe       VARCHAR(10)  NOT NULL,
                 indicator       VARCHAR(100) NOT NULL,
                 model_name      VARCHAR(100) NOT NULL,
-                predicted_year  SMALLINT     NOT NULL,
+                predicted_time  DATE         NOT NULL,
                 predicted_value NUMERIC(18,4),
                 confidence_low  NUMERIC(18,4),
                 confidence_high NUMERIC(18,4),
                 run_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-                UNIQUE (commodity_id, indicator, model_name, predicted_year)
+                UNIQUE (commodity_id, timeframe, indicator, model_name, predicted_time)
             )
         """))
-        conn.execute(text("TRUNCATE TABLE gold.fact_predictions RESTART IDENTITY CASCADE"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_gold_pred_commodity ON gold.fact_predictions (commodity_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_gold_pred_model ON gold.fact_predictions (model_name)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_gold_pred_tf_time ON gold.fact_predictions (timeframe, predicted_time)"))
 
     print("  [4/4] Writing predictions...")
     out = preds_df.rename(columns={"country_id": "commodity_id"})

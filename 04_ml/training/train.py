@@ -1,27 +1,11 @@
 """
-train.py - MLflow-tracked training for stock price forecasting.
-
-For each model type (linear_trend, holt_smoothing):
-  1. Opens an MLflow run
-  2. Logs hyperparameters (horizon, min_obs, n_tickers, indicators)
-  3. Fits models on gold.fact_commodity_prices data
-  4. Logs metrics (MAE, RMSE, MAPE, R²) when hold-out data is available
-  5. Saves a predictions CSV as an MLflow artifact
-  6. Writes all predictions to gold.fact_predictions
-
-MLflow UI:
-    mlflow ui --port 5001
-    # then open http://localhost:5001
-
-Usage:
-    python 04_ml/training/train.py
-    python 04_ml/training/train.py --no-register
-    python 04_ml/training/train.py --indicator close_price
+train.py - MLflow-tracked training for stock price forecasting across all timeframes.
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import os
 import sys
 import tempfile
@@ -53,9 +37,6 @@ from evaluate import compute_metrics, evaluate_all, print_report
 
 _CONFIG_PATH = Path(__file__).parent.parent / "mlflow" / "mlflow_config.yaml"
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
 
 def _load_config() -> dict:
     if _CONFIG_PATH.exists():
@@ -130,11 +111,6 @@ def _same_artifact_location(left: str | None, right: str) -> bool:
 def _repair_file_store_experiment(cfg: dict) -> None:
     """
     Repair local MLflow metadata created inside Docker.
-
-    Existing mlruns metadata may point artifact paths at /app, which is valid in
-    containers but read-only or missing from a host Python run. MLflow does not
-    expose an API to edit an experiment's artifact root, so for the local file
-    store we update the experiment meta.yaml before starting new runs.
     """
     tracking_uri = mlflow.get_tracking_uri()
     parsed = urlparse(tracking_uri)
@@ -170,7 +146,6 @@ def _repair_file_store_experiment(cfg: dict) -> None:
 
 
 def _configure_mlflow(cfg: dict) -> None:
-    # Use environment variable if specified, otherwise fall back to local config
     env_uri = os.environ.get("MLFLOW_TRACKING_URI")
     if env_uri:
         tracking_uri = env_uri
@@ -180,7 +155,6 @@ def _configure_mlflow(cfg: dict) -> None:
     artifact_location = _resolve_artifact_location(cfg)
     mlflow.set_tracking_uri(tracking_uri)
     
-    # Only repair file-based experiment metadata if we are using a local file URI
     if not env_uri or env_uri.startswith("file:"):
         _repair_file_store_experiment(cfg)
 
@@ -193,21 +167,14 @@ def _configure_mlflow(cfg: dict) -> None:
     mlflow.set_experiment(experiment_name)
 
 
-# ---------------------------------------------------------------------------
-# Fitting one model type across all (ticker, indicator) series
-# ---------------------------------------------------------------------------
-
 def _fit_model(
     df: pd.DataFrame,
     model_name: str,
+    timeframe: str,
     test_size: int = 1,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Fit one model across every (ticker, indicator) group in df.
-
-    Returns:
-        predictions_df — ready to write to gold.fact_predictions
-        metrics_df     — per-group hold-out metrics (empty if not enough data)
+    Fit one model across every (ticker, indicator) group in df for the given timeframe.
     """
     fn = _linear_trend if model_name == "linear_trend" else _holt_smoothing
 
@@ -216,10 +183,10 @@ def _fit_model(
 
     for (commodity_id, indicator), grp in df.groupby(["country_id", "indicator"]):
         series = (
-            grp[["year", "value"]]
+            grp[["time_index", "value"]]
             .dropna(subset=["value"])
-            .sort_values("year")
-            .drop_duplicates(subset=["year"])
+            .sort_values("time_index")
+            .drop_duplicates(subset=["time_index"])
             .reset_index(drop=True)
         )
 
@@ -234,21 +201,44 @@ def _fit_model(
             train = series
             test  = None
 
-        last_year      = int(train["year"].values[-1])
-        forecast_years = np.array([last_year + h for h in range(1, HORIZON + 1)])
+        dates = train["time_index"].values
+        values = train["value"].values
+        n = len(dates)
+        
+        x = np.arange(n)
+        forecast_steps = np.arange(n, n + HORIZON)
+        
+        last_date = dates[-1]
+        forecast_dates = []
+        for step in forecast_steps:
+            offset = int(step - (n - 1))
+            if timeframe == 'day':
+                fdate = last_date + dt.timedelta(days=offset)
+            elif timeframe == 'week':
+                fdate = last_date + dt.timedelta(weeks=offset)
+            elif timeframe == 'month':
+                year = last_date.year + (last_date.month - 1 + offset) // 12
+                month = (last_date.month - 1 + offset) % 12 + 1
+                fdate = dt.date(year, month, 1)
+            elif timeframe == 'year':
+                fdate = dt.date(last_date.year + offset, 1, 1)
+            else:
+                fdate = last_date + dt.timedelta(days=offset)
+            forecast_dates.append(fdate)
 
         try:
-            preds = fn(train["year"].values, train["value"].values, forecast_years)
+            preds = fn(x, values, forecast_steps, forecast_dates)
         except Exception as exc:
-            print(f"    [warn] {model_name} failed commodity_id={commodity_id} {indicator}: {exc}")
+            print(f"    [warn] {model_name} failed commodity_id={commodity_id} {indicator} timeframe={timeframe}: {exc}")
             continue
 
         for _, row in preds.iterrows():
             pred_rows.append({
                 "commodity_id":    int(commodity_id),
+                "timeframe":       timeframe,
                 "indicator":       indicator,
                 "model_name":      model_name,
-                "predicted_year":  row["predicted_year"],
+                "predicted_time":  row["predicted_time"],
                 "predicted_value": row["predicted_value"],
                 "confidence_low":  row["confidence_low"],
                 "confidence_high": row["confidence_high"],
@@ -257,8 +247,8 @@ def _fit_model(
         # Hold-out metrics
         if test is not None:
             for _, trow in test.iterrows():
-                ty   = int(trow["year"])
-                pred = preds.loc[preds["predicted_year"] == ty, "predicted_value"]
+                tdat   = trow["time_index"]
+                pred = preds.loc[preds["predicted_time"] == tdat, "predicted_value"]
                 if pred.empty:
                     continue
                 m = compute_metrics(
@@ -278,22 +268,21 @@ def _fit_model(
     return pred_df, metric_df
 
 
-# ---------------------------------------------------------------------------
-# MLflow run for one model type
-# ---------------------------------------------------------------------------
-
 def _run_experiment(
     df: pd.DataFrame,
     model_name: str,
+    timeframe: str,
     cfg: dict,
     test_size: int,
     register: bool,
 ) -> pd.DataFrame:
     """Open one MLflow run, fit the model, log everything, return predictions."""
-    with mlflow.start_run(run_name=model_name) as run:
+    run_name = f"{model_name}_{timeframe}"
+    with mlflow.start_run(run_name=run_name) as run:
         # ── Parameters ──────────────────────────────────────────────────────
         mlflow.log_params({
             "model_name":  model_name,
+            "timeframe":   timeframe,
             "horizon":     HORIZON,
             "min_obs":     MIN_OBS,
             "test_size":   test_size,
@@ -304,10 +293,11 @@ def _run_experiment(
         mlflow.set_tags({
             "project": cfg.get("default_tags", {}).get("project", "finnhub-trading-pipeline"),
             "team":    cfg.get("default_tags", {}).get("team", "data-engineering"),
+            "timeframe": timeframe,
         })
 
         # ── Fit ─────────────────────────────────────────────────────────────
-        preds_df, metric_df = _fit_model(df, model_name, test_size=test_size)
+        preds_df, metric_df = _fit_model(df, model_name, timeframe=timeframe, test_size=test_size)
         n_series = int(df.groupby(["country_id", "indicator"]).ngroups)
         n_fitted = int(preds_df["commodity_id"].nunique()) if not preds_df.empty else 0
 
@@ -328,18 +318,18 @@ def _run_experiment(
         else:
             mlflow.log_metric("avg_mae", -1)
             print(f"  {model_name}: metrics not computed "
-                  f"(need >{MIN_OBS + test_size} pipeline runs to accumulate history)")
+                  f"(need >{MIN_OBS + test_size} historical data points to evaluate)")
 
         # ── Artifacts ───────────────────────────────────────────────────────
         if not preds_df.empty:
             with tempfile.TemporaryDirectory() as tmp:
-                csv_path = os.path.join(tmp, f"predictions_{model_name}.csv")
+                csv_path = os.path.join(tmp, f"predictions_{model_name}_{timeframe}.csv")
                 preds_df.to_csv(csv_path, index=False)
                 mlflow.log_artifact(csv_path, artifact_path="predictions")
 
             if not metric_df.empty:
                 with tempfile.TemporaryDirectory() as tmp:
-                    m_path = os.path.join(tmp, f"metrics_{model_name}.csv")
+                    m_path = os.path.join(tmp, f"metrics_{model_name}_{timeframe}.csv")
                     metric_df.to_csv(m_path, index=False)
                     mlflow.log_artifact(m_path, artifact_path="metrics")
 
@@ -347,10 +337,6 @@ def _run_experiment(
 
     return preds_df
 
-
-# ---------------------------------------------------------------------------
-# Write predictions to gold.fact_predictions
-# ---------------------------------------------------------------------------
 
 def _write_predictions(all_preds: list[pd.DataFrame], engine) -> None:
     if not all_preds:
@@ -362,21 +348,25 @@ def _write_predictions(all_preds: list[pd.DataFrame], engine) -> None:
 
     with engine.begin() as conn:
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS gold"))
+        conn.execute(text("DROP TABLE IF EXISTS gold.fact_predictions CASCADE"))
         conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS gold.fact_predictions (
+            CREATE TABLE gold.fact_predictions (
                 id              SERIAL       PRIMARY KEY,
                 commodity_id    INT          NOT NULL REFERENCES gold.dim_commodity (commodity_id),
+                timeframe       VARCHAR(10)  NOT NULL,
                 indicator       VARCHAR(100) NOT NULL,
                 model_name      VARCHAR(100) NOT NULL,
-                predicted_year  SMALLINT     NOT NULL,
+                predicted_time  DATE         NOT NULL,
                 predicted_value NUMERIC(18,4),
                 confidence_low  NUMERIC(18,4),
                 confidence_high NUMERIC(18,4),
                 run_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-                UNIQUE (commodity_id, indicator, model_name, predicted_year)
+                UNIQUE (commodity_id, timeframe, indicator, model_name, predicted_time)
             )
         """))
-        conn.execute(text("TRUNCATE TABLE gold.fact_predictions RESTART IDENTITY CASCADE"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_gold_pred_commodity ON gold.fact_predictions (commodity_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_gold_pred_model ON gold.fact_predictions (model_name)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_gold_pred_tf_time ON gold.fact_predictions (timeframe, predicted_time)"))
 
     combined.to_sql(
         "fact_predictions", engine, schema="gold",
@@ -384,10 +374,6 @@ def _write_predictions(all_preds: list[pd.DataFrame], engine) -> None:
     )
     print(f"  {len(combined):,} rows -> gold.fact_predictions")
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 def train(
     register: bool = True,
@@ -422,10 +408,21 @@ def train(
     model_types = ["linear_trend", "holt_smoothing"]
     all_preds: list[pd.DataFrame] = []
 
-    for model_name in model_types:
-        print(f"--- {model_name} ---")
-        preds = _run_experiment(df, model_name, cfg, test_size, register)
-        all_preds.append(preds)
+    # Loop over all active timeframes in the data
+    timeframes = df["timeframe"].unique() if "timeframe" in df.columns else ["year"]
+    for timeframe in timeframes:
+        print(f"\n==================================================")
+        print(f"Timeframe: {timeframe.upper()}")
+        print(f"==================================================")
+        tf_df = df[df["timeframe"] == timeframe]
+        if tf_df.empty:
+            continue
+
+        for model_name in model_types:
+            run_name = f"{model_name}_{timeframe}"
+            print(f"--- {run_name} ---")
+            preds = _run_experiment(tf_df, model_name, timeframe, cfg, test_size, register)
+            all_preds.append(preds)
 
     print("\n=== Writing gold.fact_predictions ===")
     _write_predictions(all_preds, engine)

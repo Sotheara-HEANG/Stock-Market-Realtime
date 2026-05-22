@@ -1,5 +1,5 @@
 """
-dashboard.py - Streamlit dashboard for Finnhub stock market analytics.
+dashboard.py - Streamlit dashboard for Finnhub stock market analytics across all timeframes.
 """
 
 from __future__ import annotations
@@ -40,7 +40,8 @@ PRICE_COLUMNS = [
     "symbol",
     "commodity_name",
     "commodity_category",
-    "year",
+    "timeframe",
+    "time_index",
     "open_price",
     "high_price",
     "low_price",
@@ -55,6 +56,7 @@ PRICE_COLUMNS = [
     "category_avg_close",
     "category_count",
 ]
+
 
 def _empty_prices() -> pd.DataFrame:
     return pd.DataFrame(columns=PRICE_COLUMNS)
@@ -81,7 +83,8 @@ def _load_prices() -> pd.DataFrame:
             SELECT d.symbol,
                    d.commodity_name,
                    d.commodity_category,
-                   f.year,
+                   f.timeframe,
+                   f.time_index,
                    f.open_price,
                    f.high_price,
                    f.low_price,
@@ -97,7 +100,7 @@ def _load_prices() -> pd.DataFrame:
                    f.category_count
             FROM   gold.fact_commodity_prices f
             JOIN   gold.dim_commodity         d ON d.commodity_id = f.commodity_id
-            ORDER  BY d.symbol, f.year
+            ORDER  BY d.symbol, f.timeframe, f.time_index
         """), conn)
 
 
@@ -105,7 +108,7 @@ def _latest_snapshot(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df.copy()
     return (
-        df.sort_values(["symbol", "year"])
+        df.sort_values(["symbol", "time_index"])
         .groupby("symbol", as_index=False)
         .tail(1)
         .sort_values("close_price", ascending=False)
@@ -371,130 +374,6 @@ def _inject_style() -> None:
             box-shadow: none !important;
         }
 
-        /* ── Premium UI Micro-Animations ────────────────────────────────── */
-        @keyframes premiumPopUp {
-            0% {
-                opacity: 0;
-                transform: translateY(14px) scale(0.97);
-                filter: brightness(1.2) blur(1px);
-            }
-            100% {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-                filter: brightness(1) blur(0);
-            }
-        }
-        @keyframes liveMetricUpdate {
-            0% {
-                opacity: 0.7;
-                transform: scale(0.96);
-                border-color: var(--cyan);
-                box-shadow: 0 0 18px rgba(33, 212, 253, 0.4);
-            }
-            40% {
-                transform: scale(1.025);
-                border-color: var(--purple);
-                box-shadow: 0 0 22px rgba(200, 76, 255, 0.35);
-            }
-            100% {
-                opacity: 1;
-                transform: scale(1);
-                border-color: #29304b;
-                box-shadow: 0 20px 44px rgba(0,0,0,.28);
-            }
-        }
-        @keyframes chartUpdate {
-            0% {
-                opacity: 0.8;
-                transform: scale(0.99);
-                border-color: var(--cyan);
-                box-shadow: 0 0 15px rgba(33, 212, 253, 0.22);
-            }
-            100% {
-                opacity: 1;
-                transform: scale(1);
-                border-color: #29304b;
-                box-shadow: 0 18px 42px rgba(0,0,0,.18);
-            }
-        }
-        @keyframes tableUpdate {
-            0% {
-                opacity: 0.8;
-                transform: translateY(6px);
-                border-color: var(--purple);
-                box-shadow: 0 0 15px rgba(200, 76, 255, 0.22);
-            }
-            100% {
-                opacity: 1;
-                transform: translateY(0);
-                border-color: #29304b;
-                box-shadow: none;
-            }
-        }
-        @keyframes livePulseDot {
-            0% {
-                transform: scale(0.9);
-                box-shadow: 0 0 0 0 rgba(33, 212, 253, 0.7);
-            }
-            70% {
-                transform: scale(1);
-                box-shadow: 0 0 0 8px rgba(33, 212, 253, 0);
-            }
-            100% {
-                transform: scale(0.9);
-                box-shadow: 0 0 0 0 rgba(33, 212, 253, 0);
-            }
-        }
-
-        /* ── Applying Animations ── */
-        .commodity-header {
-            animation: premiumPopUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
-        }
-        .stat-card.purple {
-            animation: premiumPopUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
-            animation-delay: 0.04s;
-        }
-        .stat-card.cyan {
-            animation: premiumPopUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
-            animation-delay: 0.08s;
-        }
-        .stat-card.dark {
-            animation: premiumPopUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
-            animation-delay: 0.12s;
-        }
-        .mini-card {
-            animation: premiumPopUp 0.58s cubic-bezier(0.16, 1, 0.3, 1) both;
-        }
-        .mini-card:nth-of-type(1) { animation-delay: 0.12s; }
-        .mini-card:nth-of-type(2) { animation-delay: 0.16s; }
-
-        /* Form Controls staggered load */
-        div[data-testid="stSelectbox"],
-        div[data-testid="stSlider"],
-        div[data-testid="stRadio"],
-        div[data-testid="stTextInput"],
-        div[data-testid="stMultiSelect"] {
-            animation: premiumPopUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
-            animation-delay: 0.18s;
-        }
-
-        /* Live fragments entry & update animations */
-        div[data-testid="stMetric"] {
-            animation: liveMetricUpdate 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-        }
-        /* Stagger metric cards updates slightly */
-        div[data-testid="stMetric"]:nth-of-type(1) { animation-delay: 0s; }
-        div[data-testid="stMetric"]:nth-of-type(2) { animation-delay: 0.04s; }
-        div[data-testid="stMetric"]:nth-of-type(3) { animation-delay: 0.08s; }
-        div[data-testid="stMetric"]:nth-of-type(4) { animation-delay: 0.12s; }
-
-        .stPlotlyChart {
-            animation: chartUpdate 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
-        }
-        [data-testid="stDataFrame"] {
-            animation: tableUpdate 0.62s cubic-bezier(0.16, 1, 0.3, 1) both;
-        }
-
         /* Pulse indicator styling */
         .live-indicator-container {
             display: inline-flex;
@@ -516,6 +395,140 @@ def _inject_style() -> None:
             font-weight: 800;
             margin: 0;
         }
+        @keyframes livePulseDot {
+            0% {
+                transform: scale(0.9);
+                box-shadow: 0 0 0 0 rgba(33, 212, 253, 0.7);
+            }
+            70% {
+                transform: scale(1);
+                box-shadow: 0 0 0 8px rgba(33, 212, 253, 0);
+            }
+            100% {
+                transform: scale(0.9);
+                box-shadow: 0 0 0 0 rgba(33, 212, 253, 0);
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    _inject_dynamic_animations()
+
+
+def _inject_dynamic_animations() -> None:
+    anim_id = int(time.time() * 1000)
+    st.markdown(
+        f"""
+        <style>
+        /* ── Premium UI Micro-Animations ────────────────────────────────── */
+        @keyframes premiumPopUp_{anim_id} {{
+            0% {{
+                opacity: 0;
+                transform: translateY(14px) scale(0.97);
+                filter: brightness(1.2) blur(1px);
+            }}
+            100% {{
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                filter: brightness(1) blur(0);
+            }}
+        }}
+        @keyframes liveMetricUpdate_{anim_id} {{
+            0% {{
+                opacity: 0.7;
+                transform: scale(0.96);
+                border-color: var(--cyan);
+                box-shadow: 0 0 18px rgba(33, 212, 253, 0.4);
+            }}
+            40% {{
+                transform: scale(1.025);
+                border-color: var(--purple);
+                box-shadow: 0 0 22px rgba(200, 76, 255, 0.35);
+            }}
+            100% {{
+                opacity: 1;
+                transform: scale(1);
+                border-color: #29304b;
+                box-shadow: 0 20px 44px rgba(0,0,0,.28);
+            }}
+        }}
+        @keyframes chartUpdate_{anim_id} {{
+            0% {{
+                opacity: 0.8;
+                transform: scale(0.99);
+                border-color: var(--cyan);
+                box-shadow: 0 0 15px rgba(33, 212, 253, 0.22);
+            }}
+            100% {{
+                opacity: 1;
+                transform: scale(1);
+                border-color: #29304b;
+                box-shadow: 0 18px 42px rgba(0,0,0,.18);
+            }}
+        }}
+        @keyframes tableUpdate_{anim_id} {{
+            0% {{
+                opacity: 0.8;
+                transform: translateY(6px);
+                border-color: var(--purple);
+                box-shadow: 0 0 15px rgba(200, 76, 255, 0.22);
+            }}
+            100% {{
+                opacity: 1;
+                transform: translateY(0);
+                border-color: #29304b;
+                box-shadow: none;
+            }}
+        }}
+
+        /* ── Applying Animations ── */
+        .commodity-header {{
+            animation: premiumPopUp_{anim_id} 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }}
+        .stat-card.purple {{
+            animation: premiumPopUp_{anim_id} 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation-delay: 0.04s;
+        }}
+        .stat-card.cyan {{
+            animation: premiumPopUp_{anim_id} 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation-delay: 0.08s;
+        }}
+        .stat-card.dark {{
+            animation: premiumPopUp_{anim_id} 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation-delay: 0.12s;
+        }}
+        .mini-card {{
+            animation: premiumPopUp_{anim_id} 0.58s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }}
+        .mini-card:nth-of-type(1) {{ animation-delay: 0.12s; }}
+        .mini-card:nth-of-type(2) {{ animation-delay: 0.16s; }}
+
+        /* Form Controls staggered load */
+        div[data-testid="stSelectbox"],
+        div[data-testid="stSlider"],
+        div[data-testid="stRadio"],
+        div[data-testid="stTextInput"],
+        div[data-testid="stMultiSelect"] {{
+            animation: premiumPopUp_{anim_id} 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation-delay: 0.18s;
+        }}
+
+        /* Live fragments entry & update animations */
+        div[data-testid="stMetric"] {{
+            animation: liveMetricUpdate_{anim_id} 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        }}
+        div[data-testid="stMetric"]:nth-of-type(1) {{ animation-delay: 0s; }}
+        div[data-testid="stMetric"]:nth-of-type(2) {{ animation-delay: 0.04s; }}
+        div[data-testid="stMetric"]:nth-of-type(3) {{ animation-delay: 0.08s; }}
+        div[data-testid="stMetric"]:nth-of-type(4) {{ animation-delay: 0.12s; }}
+
+        .stPlotlyChart {{
+            animation: chartUpdate_{anim_id} 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }}
+        [data-testid="stDataFrame"] {{
+            animation: tableUpdate_{anim_id} 0.62s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -574,40 +587,6 @@ def _dark_layout(fig, height: int, extra_right: int = 0, extra_bottom: int = 0):
     return fig
 
 
-# ── Batched quote cache ─────────────────────────────────────────────────────
-# Fetches all symbols in one burst, caches them for _QUOTE_CACHE_TTL seconds
-# so the 10-30s fragment re-runs never duplicate HTTP calls.
-_QUOTE_CACHE_TTL = 25  # seconds
-_quote_cache: dict[str, dict] = {}      # symbol -> quote dict
-_quote_cache_ts: float = 0.0            # last fetch epoch
-_RATE_LIMIT_DELAY = 0.35                # seconds between Finnhub calls
-
-
-def _finnhub_quote_single(symbol: str, token: str) -> dict[str, float]:
-    """Fetch a single quote from Finnhub (internal, use _finnhub_quotes_batch)."""
-    response = requests.get(
-        "https://finnhub.io/api/v1/quote",
-        params={"symbol": symbol, "token": token},
-        timeout=10,
-    )
-    response.raise_for_status()
-    data = response.json()
-    if not isinstance(data, dict) or not data.get("c"):
-        raise RuntimeError(f"No live quote for {symbol}")
-    return {
-        "live_price": float(data.get("c") or 0),
-        "open": float(data.get("o") or 0),
-        "high": float(data.get("h") or 0),
-        "low": float(data.get("l") or 0),
-        "previous_close": float(data.get("pc") or 0),
-    }
-
-
-def _finnhub_quotes_batch(symbols: list[str]) -> dict[str, dict[str, float]]:
-    """Bypassed live API calls to load instantly from warehouse database."""
-    return {}
-
-
 def _fallback_quote(row: pd.Series) -> dict[str, float]:
     return {
         "live_price": float(row.get("latest_price") or row.get("close_price") or 0),
@@ -620,6 +599,78 @@ def _fallback_quote(row: pd.Series) -> dict[str, float]:
 
 @st.fragment(run_every="30s")
 def _live_market_stream(latest_df: pd.DataFrame) -> None:
+    # Inject dynamic update style inside fragment to trigger animation on update
+    update_id = int(time.time() * 1000)
+    st.markdown(
+        f"""
+        <style>
+        @keyframes liveMetricUpdate_{update_id} {{
+            0% {{
+                opacity: 0.7;
+                transform: scale(0.96);
+                border-color: var(--cyan);
+                box-shadow: 0 0 18px rgba(33, 212, 253, 0.4);
+            }}
+            40% {{
+                transform: scale(1.025);
+                border-color: var(--purple);
+                box-shadow: 0 0 22px rgba(200, 76, 255, 0.35);
+            }}
+            100% {{
+                opacity: 1;
+                transform: scale(1);
+                border-color: #29304b;
+                box-shadow: 0 20px 44px rgba(0,0,0,.28);
+            }}
+        }}
+        @keyframes chartUpdate_{update_id} {{
+            0% {{
+                opacity: 0.8;
+                transform: scale(0.99);
+                border-color: var(--cyan);
+                box-shadow: 0 0 15px rgba(33, 212, 253, 0.22);
+            }}
+            100% {{
+                opacity: 1;
+                transform: scale(1);
+                border-color: #29304b;
+                box-shadow: 0 18px 42px rgba(0,0,0,.18);
+            }}
+        }}
+        @keyframes tableUpdate_{update_id} {{
+            0% {{
+                opacity: 0.8;
+                transform: translateY(6px);
+                border-color: var(--purple);
+                box-shadow: 0 0 15px rgba(200, 76, 255, 0.22);
+            }}
+            100% {{
+                opacity: 1;
+                transform: translateY(0);
+                border-color: #29304b;
+                box-shadow: none;
+            }}
+        }}
+        
+        div[data-testid="stMetric"] {{
+            animation: liveMetricUpdate_{update_id} 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        }}
+        div[data-testid="stMetric"]:nth-of-type(1) {{ animation-delay: 0s; }}
+        div[data-testid="stMetric"]:nth-of-type(2) {{ animation-delay: 0.04s; }}
+        div[data-testid="stMetric"]:nth-of-type(3) {{ animation-delay: 0.08s; }}
+        div[data-testid="stMetric"]:nth-of-type(4) {{ animation-delay: 0.12s; }}
+
+        .stPlotlyChart {{
+            animation: chartUpdate_{update_id} 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }}
+        [data-testid="stDataFrame"] {{
+            animation: tableUpdate_{update_id} 0.62s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.markdown(
         """
         <div class="live-indicator-container">
@@ -633,22 +684,14 @@ def _live_market_stream(latest_df: pd.DataFrame) -> None:
 
     previous_prices = st.session_state.setdefault("live_previous_prices", {})
     history = st.session_state.setdefault("live_stream_history", [])
-    # Phnom Penh is UTC+7 (no daylight saving time)
+    # Phnom Penh is UTC+7
     timestamp = dt.datetime.now(dt.timezone(dt.timedelta(hours=7)))
     rows: list[dict[str, object]] = []
 
-    # Batch-fetch all quotes at once (cached for 25s)
-    all_symbols = [str(r["symbol"]).upper() for _, r in latest_df.iterrows()]
-    batch_quotes = _finnhub_quotes_batch(all_symbols)
-
     for _, row in latest_df.iterrows():
         symbol = str(row["symbol"]).upper()
-        if symbol in batch_quotes:
-            quote = batch_quotes[symbol]
-            source = "Finnhub live"
-        else:
-            quote = _fallback_quote(row)
-            source = "Warehouse DWH"
+        quote = _fallback_quote(row)
+        source = "Warehouse DWH"
 
         live_price = quote["live_price"]
         prev_tick = previous_prices.get(symbol)
@@ -759,22 +802,23 @@ def _load_predictions() -> pd.DataFrame:
             SELECT d.symbol,
                    d.commodity_name,
                    d.commodity_category,
+                   p.timeframe,
                    p.indicator,
                    p.model_name,
-                   p.predicted_year,
+                   p.predicted_time,
                    p.predicted_value,
                    p.confidence_low,
                    p.confidence_high,
                    p.run_at
             FROM   gold.fact_predictions p
             JOIN   gold.dim_commodity    d ON d.commodity_id = p.commodity_id
-            ORDER  BY d.symbol, p.indicator, p.model_name, p.predicted_year
+            ORDER  BY d.symbol, p.timeframe, p.indicator, p.model_name, p.predicted_time
         """), conn)
 
 
-def _create_forecast_chart(hist_df: pd.DataFrame, pred_df: pd.DataFrame, ticker: str, indicator: str, model_name: str) -> go.Figure:
-    h_sub = hist_df[hist_df["symbol"] == ticker].sort_values("year")
-    p_sub = pred_df[(pred_df["symbol"] == ticker) & (pred_df["indicator"] == indicator) & (pred_df["model_name"] == model_name)].sort_values("predicted_year")
+def _create_forecast_chart(hist_df: pd.DataFrame, pred_df: pd.DataFrame, ticker: str, indicator: str, model_name: str, timeframe: str) -> go.Figure:
+    h_sub = hist_df[(hist_df["symbol"] == ticker) & (hist_df["timeframe"] == timeframe)].sort_values("time_index")
+    p_sub = pred_df[(pred_df["symbol"] == ticker) & (pred_df["timeframe"] == timeframe) & (pred_df["indicator"] == indicator) & (pred_df["model_name"] == model_name)].sort_values("predicted_time")
 
     fig = go.Figure()
 
@@ -792,21 +836,34 @@ def _create_forecast_chart(hist_df: pd.DataFrame, pred_df: pd.DataFrame, ticker:
     # 1. Plot history
     if not h_sub.empty:
         fig.add_trace(go.Scatter(
-            x=h_sub["year"],
+            x=h_sub["time_index"],
             y=h_sub[indicator],
             mode="lines+markers",
             name=f"Historical {ind_label}",
             line=dict(color="#c84cff", width=3, shape="spline"),
             marker=dict(size=6),
-            hovertemplate="Year %{x}<br>Price: $%{y:,.2f}<extra>History</extra>"
+            hovertemplate="Date: %{x}<br>Price: $%{y:,.2f}<extra>History</extra>"
         ))
 
     # 2. Plot predictions
     if not p_sub.empty:
+        # Prepend last history row to prediction rows to seamlessly bridge lines
+        if not h_sub.empty:
+            last_hist = h_sub.iloc[-1]
+            bridge_df = pd.DataFrame([{
+                "predicted_time": pd.to_datetime(last_hist["time_index"]).date(),
+                "predicted_value": float(last_hist[indicator]),
+                "confidence_low": float(last_hist[indicator]),
+                "confidence_high": float(last_hist[indicator])
+            }])
+            p_sub_plot = pd.concat([bridge_df, p_sub], ignore_index=True)
+        else:
+            p_sub_plot = p_sub
+
         # Transparent lower bound line
         fig.add_trace(go.Scatter(
-            x=p_sub["predicted_year"],
-            y=p_sub["confidence_low"],
+            x=p_sub_plot["predicted_time"],
+            y=p_sub_plot["confidence_low"],
             mode="lines",
             line=dict(width=0, shape="spline"),
             showlegend=False,
@@ -815,8 +872,8 @@ def _create_forecast_chart(hist_df: pd.DataFrame, pred_df: pd.DataFrame, ticker:
         
         # Upper bound line with fill to previous trace
         fig.add_trace(go.Scatter(
-            x=p_sub["predicted_year"],
-            y=p_sub["confidence_high"],
+            x=p_sub_plot["predicted_time"],
+            y=p_sub_plot["confidence_high"],
             mode="lines",
             fill="tonexty",
             fillcolor="rgba(33, 212, 253, 0.12)",
@@ -827,23 +884,22 @@ def _create_forecast_chart(hist_df: pd.DataFrame, pred_df: pd.DataFrame, ticker:
 
         # Main forecast line
         fig.add_trace(go.Scatter(
-            x=p_sub["predicted_year"],
-            y=p_sub["predicted_value"],
+            x=p_sub_plot["predicted_time"],
+            y=p_sub_plot["predicted_value"],
             mode="lines+markers",
             name=f"Forecast ({model_name})",
             line=dict(color="#21d4fd", width=3, dash="dash", shape="spline"),
             marker=dict(size=7, symbol="diamond"),
-            hovertemplate="Year %{x}<br>Forecast: $%{y:,.2f}<extra>Prediction</extra>"
+            hovertemplate="Date: %{x}<br>Forecast: $%{y:,.2f}<extra>Prediction</extra>"
         ))
 
     model_title = "Linear Trend" if model_name == "linear_trend" else "Holt's Smoothing"
     fig.update_layout(
         title=f"🔮 {ticker} {ind_label} Forecast using {model_title}",
         xaxis=dict(
-            title="Year",
-            tickmode="linear",
-            dtick=1,
+            title="Time",
             gridcolor="#222b45",
+            type="date",
         ),
         yaxis=dict(
             title="Price (USD)",
@@ -887,7 +943,7 @@ def main() -> None:
         st.warning("Warehouse is empty. Run `python main.py` to ingest Finnhub stock prices.")
         return
 
-    all_years = sorted(df["year"].dropna().astype(int).unique().tolist())
+    # Extract all sectors
     all_categories = sorted(df["commodity_category"].dropna().unique().tolist())
 
     with st.sidebar:
@@ -903,6 +959,31 @@ def main() -> None:
             key="side_view_selector",
         )
 
+        # Timeframe Selector (Focus on Weeks by default)
+        st.markdown('<div class="side-section">Granularity</div>', unsafe_allow_html=True)
+        selected_tf_label = st.selectbox(
+            "Timeframe Granularity",
+            ["Days", "Weeks", "Months", "Years"],
+            index=1,  # Default to Weeks (per instruction)
+            help="Select granularity of the historical and forecast views"
+        )
+        tf_map = {
+            "Days": "day",
+            "Weeks": "week",
+            "Months": "month",
+            "Years": "year"
+        }
+        selected_tf = tf_map[selected_tf_label]
+
+        # Filter database by selected timeframe granularity
+        df_tf = df[df["timeframe"] == selected_tf].copy()
+
+        if df_tf.empty:
+            st.error(f"No database records found for timeframe: {selected_tf_label}. Ingesting...")
+            return
+
+        all_dates = sorted(df_tf["time_index"].dropna().unique().tolist())
+
         if selected_view == "📡 Live & History":
             st.markdown('<div class="side-section">Filter Stocks</div>', unsafe_allow_html=True)
             selected_categories = st.multiselect(
@@ -911,18 +992,26 @@ def main() -> None:
                 default=all_categories,
                 help="Choose which market sectors to display",
             )
-            year_range = st.slider(
-                "Date range (year)",
-                min_value=min(all_years),
-                max_value=max(all_years),
-                value=(min(all_years), max(all_years)),
+            
+            # Stretches range slider over date domain
+            min_date = pd.to_datetime(all_dates[0]).date()
+            max_date = pd.to_datetime(all_dates[-1]).date()
+            if min_date == max_date:
+                max_date = max_date + dt.timedelta(days=1)
+
+            date_range = st.slider(
+                "Date range",
+                min_value=min_date,
+                max_value=max_date,
+                value=(min_date, max_date),
                 help="Filter the historical price charts below",
             )
+            
             search_text = st.text_input("Search by ticker or company", placeholder="e.g. AAPL or Apple")
             if search_text:
-                match_count = df[
-                    df["symbol"].str.contains(search_text, case=False, na=False)
-                    | df["commodity_name"].str.contains(search_text, case=False, na=False)
+                match_count = df_tf[
+                    df_tf["symbol"].str.contains(search_text, case=False, na=False)
+                    | df_tf["commodity_name"].str.contains(search_text, case=False, na=False)
                 ]["symbol"].nunique()
                 st.caption(f"🔍 Found {match_count} matching stock{'s' if match_count != 1 else ''}.")
 
@@ -933,10 +1022,11 @@ def main() -> None:
             st.caption("Forecasting models are automatically fit, evaluated, and logged to MLflow via the containerized ML pipeline.")
 
     if selected_view == "📡 Live & History":
-        filtered_df = df[
-            df["commodity_category"].isin(selected_categories)
-            & df["year"].between(year_range[0], year_range[1])
+        filtered_df = df_tf[
+            df_tf["commodity_category"].isin(selected_categories)
+            & pd.to_datetime(df_tf["time_index"]).dt.date.between(date_range[0], date_range[1])
         ].copy()
+        
         if search_text:
             filtered_df = filtered_df[
                 filtered_df["symbol"].str.contains(search_text, case=False, na=False)
@@ -955,9 +1045,9 @@ def main() -> None:
         avg_change = latest_df["price_change_pct"].mean()
 
         st.markdown(
-            """
+            f"""
             <div class="commodity-header">
-                <h1>📈 Stock Market Dashboard</h1>
+                <h1>📈 Stock Market Dashboard ({selected_tf_label})</h1>
                 <p>Track live stock prices, compare trends, and monitor your watchlist — powered by Finnhub.</p>
             </div>
             """,
@@ -968,7 +1058,7 @@ def main() -> None:
         with top1:
             _stat_card("Avg Close Price", f"${avg_close:,.2f}", "", "purple")
         with top2:
-            _stat_card("Avg Daily Change", f"{avg_change:,.2f}", "%", "cyan")
+            _stat_card("Avg Change", f"{avg_change:,.2f}", "%", "cyan")
         with top3:
             _mini_card("Stocks Going Up", f"+{rising}", True)
             _mini_card("Stocks Going Down", f"-{falling}", False)
@@ -980,10 +1070,9 @@ def main() -> None:
 
         bottom_left, bottom_right = st.columns([1.55, 1])
         with bottom_left:
-            _block_title("📊 Price History")
+            _block_title(f"📊 Price History ({selected_tf_label})")
             _help_line("How stock prices have changed over time. Smooth spline curves make trends easy to follow.")
             
-            # Select tickers to display (prevents horizontal clutter)
             all_symbols_in_filters = sorted(filtered_df["symbol"].unique())
             
             c_sel1, c_sel2 = st.columns([2.2, 1])
@@ -1021,20 +1110,19 @@ def main() -> None:
                     "low_price": "Low Price"
                 }.get(selected_metric, selected_metric)
 
-                # Vibrant high-contrast colors matching dark mode
                 CHART_THEMES = [
-                    {"line": "#21d4fd", "fill": "rgba(33, 212, 253, 0.12)"},  # Cyan glow
-                    {"line": "#c84cff", "fill": "rgba(200, 76, 255, 0.12)"},  # Purple glow
-                    {"line": "#ff5bc8", "fill": "rgba(255, 91, 200, 0.12)"},  # Pink glow
-                    {"line": "#7c8cff", "fill": "rgba(124, 140, 255, 0.12)"}, # Blue glow
-                    {"line": "#22e6a8", "fill": "rgba(34, 230, 168, 0.12)"},  # Green glow
-                    {"line": "#f6b44b", "fill": "rgba(246, 180, 75, 0.12)"},  # Orange glow
-                    {"line": "#ff4b4b", "fill": "rgba(255, 75, 75, 0.12)"},   # Red glow
-                    {"line": "#1cdb6d", "fill": "rgba(28, 219, 109, 0.12)"},  # Emerald glow
+                    {"line": "#21d4fd", "fill": "rgba(33, 212, 253, 0.12)"},
+                    {"line": "#c84cff", "fill": "rgba(200, 76, 255, 0.12)"},
+                    {"line": "#ff5bc8", "fill": "rgba(255, 91, 200, 0.12)"},
+                    {"line": "#7c8cff", "fill": "rgba(124, 140, 255, 0.12)"},
+                    {"line": "#22e6a8", "fill": "rgba(34, 230, 168, 0.12)"},
+                    {"line": "#f6b44b", "fill": "rgba(246, 180, 75, 0.12)"},
+                    {"line": "#ff4b4b", "fill": "rgba(255, 75, 75, 0.12)"},
+                    {"line": "#1cdb6d", "fill": "rgba(28, 219, 109, 0.12)"},
                 ]
                 
                 for idx, sym in enumerate(selected_symbols_history):
-                    sym_df = history_plot_df[history_plot_df["symbol"] == sym].sort_values("year")
+                    sym_df = history_plot_df[history_plot_df["symbol"] == sym].sort_values("time_index")
                     if sym_df.empty:
                         continue
                     
@@ -1044,7 +1132,7 @@ def main() -> None:
                     
                     if is_single:
                         fig.add_trace(go.Scatter(
-                            x=sym_df["year"],
+                            x=sym_df["time_index"],
                             y=sym_df[selected_metric],
                             mode="lines+markers",
                             name=f"{sym} ({metric_label})",
@@ -1052,28 +1140,27 @@ def main() -> None:
                             marker=dict(size=8, symbol="circle", line=dict(color="#151a2e", width=1.5)),
                             fill="tozeroy",
                             fillcolor=fill_color,
-                            hovertemplate=f"<b>{sym}</b><br>Year: %{{x}}<br>{metric_label}: $%{{y:,.2f}}<extra></extra>"
+                            hovertemplate=f"<b>{sym}</b><br>Date: %{{x}}<br>{metric_label}: $%{{y:,.2f}}<extra></extra>"
                         ))
                     else:
                         fig.add_trace(go.Scatter(
-                            x=sym_df["year"],
+                            x=sym_df["time_index"],
                             y=sym_df[selected_metric],
                             mode="lines+markers",
                             name=sym,
                             line=dict(color=color, width=3, shape="spline"),
                             marker=dict(size=7, symbol="circle", line=dict(color="#151a2e", width=1)),
-                            hovertemplate=f"<b>{sym}</b><br>Year: %{{x}}<br>{metric_label}: $%{{y:,.2f}}<extra></extra>"
+                            hovertemplate=f"<b>{sym}</b><br>Date: %{{x}}<br>{metric_label}: $%{{y:,.2f}}<extra></extra>"
                         ))
                 
                 fig.update_layout(
                     title=dict(
-                        text=f"📈 Historical {metric_label} Trends",
+                        text=f"📈 Historical {metric_label} Trends ({selected_tf_label})",
                         font=dict(color="#f8fbff", size=16, weight="bold")
                     ),
                     xaxis=dict(
-                        title=dict(text="Year", font=dict(color="#aeb9d8")),
-                        tickmode="linear",
-                        dtick=1,
+                        title=dict(text="Date", font=dict(color="#aeb9d8")),
+                        type="date",
                         gridcolor="#222b45",
                         tickfont=dict(color="#aeb9d8")
                     ),
@@ -1120,10 +1207,16 @@ def main() -> None:
             st.warning("No prediction data found in database. Run the pipeline to generate forecasts.")
             return
 
+        # Check if predictions exist for selected timeframe
+        pred_df_tf = pred_df[pred_df["timeframe"] == selected_tf].copy()
+        if pred_df_tf.empty:
+            st.warning(f"No forecasting predictions generated for {selected_tf_label} yet. Execute train.py to build models.")
+            return
+
         st.markdown(
-            """
+            f"""
             <div class="commodity-header">
-                <h1>🔮 Machine Learning Price Forecasting</h1>
+                <h1>🔮 ML Price Forecasting ({selected_tf_label})</h1>
                 <p>Track advanced predictive analytics driven by Linear Trend and Holt's Exponential Smoothing models — logged via MLflow.</p>
             </div>
             """,
@@ -1133,14 +1226,14 @@ def main() -> None:
         # Forecasting controls
         ctrl1, ctrl2, ctrl3 = st.columns(3)
         with ctrl1:
-            all_symbols = sorted(pred_df["symbol"].unique())
+            all_symbols = sorted(pred_df_tf["symbol"].unique())
             selected_ticker = st.selectbox(
                 "Select Stock Ticker",
                 options=all_symbols,
                 help="Select which stock symbol to analyze forecasts for"
             )
         with ctrl2:
-            model_options = sorted(pred_df["model_name"].unique())
+            model_options = sorted(pred_df_tf["model_name"].unique())
             model_name_map = {
                 "linear_trend": "Linear Trend",
                 "holt_smoothing": "Holt's Exponential Smoothing"
@@ -1152,7 +1245,7 @@ def main() -> None:
                 help="Choose which algorithm's forecast to display"
             )
         with ctrl3:
-            indicator_options = sorted(pred_df["indicator"].unique())
+            indicator_options = sorted(pred_df_tf["indicator"].unique())
             indicator_name_map = {
                 "close_price": "Close Price",
                 "open_price": "Open Price",
@@ -1168,10 +1261,10 @@ def main() -> None:
             )
 
         # Load run metadata
-        ticker_preds = pred_df[
-            (pred_df["symbol"] == selected_ticker) & 
-            (pred_df["indicator"] == selected_indicator) & 
-            (pred_df["model_name"] == selected_model_raw)
+        ticker_preds = pred_df_tf[
+            (pred_df_tf["symbol"] == selected_ticker) & 
+            (pred_df_tf["indicator"] == selected_indicator) & 
+            (pred_df_tf["model_name"] == selected_model_raw)
         ]
         
         f_top1, f_top2 = st.columns(2)
@@ -1186,15 +1279,15 @@ def main() -> None:
         st.markdown('<div class="block-title">📊 Forecast Projections Timeline</div>', unsafe_allow_html=True)
         st.markdown('<p class="help-line">History line (solid purple) joined seamlessly with forecasting line (dashed cyan) surrounded by a 95% confidence interval shaded glow.</p>', unsafe_allow_html=True)
         
-        fig = _create_forecast_chart(df, pred_df, selected_ticker, selected_indicator, selected_model_raw)
+        fig = _create_forecast_chart(df, pred_df_tf, selected_ticker, selected_indicator, selected_model_raw, selected_tf)
         st.plotly_chart(_dark_layout(fig, 380, extra_right=30), width="stretch")
 
         # Table of forecast values
         st.markdown('<div class="block-title">📋 Detailed Forecast Values</div>', unsafe_allow_html=True)
-        st.markdown('<p class="help-line">Exact values and confidence boundaries for the projected 3-year horizon. Spread % represents bound uncertainty.</p>', unsafe_allow_html=True)
+        st.markdown('<p class="help-line">Exact values and confidence boundaries for the projected 3-period horizon. Spread % represents bound uncertainty.</p>', unsafe_allow_html=True)
         
         if not ticker_preds.empty:
-            display_preds = ticker_preds[["predicted_year", "predicted_value", "confidence_low", "confidence_high"]].copy()
+            display_preds = ticker_preds[["predicted_time", "predicted_value", "confidence_low", "confidence_high"]].copy()
             # Convert values to float
             display_preds["predicted_value"] = display_preds["predicted_value"].astype(float)
             display_preds["confidence_low"] = display_preds["confidence_low"].astype(float)
@@ -1205,7 +1298,7 @@ def main() -> None:
             
             # Format columns
             display_preds = display_preds.rename(columns={
-                "predicted_year": "Projected Year",
+                "predicted_time": "Projected Date",
                 "predicted_value": "Forecasted Price (USD)",
                 "confidence_low": "Lower Confidence Bound",
                 "confidence_high": "Upper Confidence Bound",
