@@ -120,18 +120,18 @@ def _colour_change(val):
     if pd.isna(val):
         return ""
     if val > 0:
-        return "color: #15803d; font-weight: bold"
+        return "color: #6b9e7a; font-weight: 600"
     if val < 0:
-        return "color: #b91c1c; font-weight: bold"
-    return "color: #475569; font-weight: bold"
+        return "color: #b85c5c; font-weight: 600"
+    return "color: #71717a; font-weight: 600"
 
 
 def _tick_colour(val):
     if str(val).lower() == "up":
-        return "color: #21d4fd; font-weight: bold"
+        return "color: #6b9e7a; font-weight: 600"
     if str(val).lower() == "down":
-        return "color: #ff5bc8; font-weight: bold"
-    return "color: #a8b3cf; font-weight: bold"
+        return "color: #b85c5c; font-weight: 600"
+    return "color: #71717a; font-weight: 600"
 
 
 def _inject_style() -> None:
@@ -139,22 +139,18 @@ def _inject_style() -> None:
         """
         <style>
         :root {
-            --bg: #0c1020;
-            --panel: #151a2e;
-            --panel-2: #1a2038;
-            --line: #29304b;
-            --text: #eef3ff;
-            --muted: #9aa6c3;
-            --cyan: #21d4fd;
-            --purple: #c84cff;
-            --pink: #ff5bc8;
+            --bg: #111114;
+            --panel: #19191f;
+            --line: #27272e;
+            --text: #d4d4d8;
+            --muted: #71717a;
+            --accent: #a1a1aa;
+            --up: #6b9e7a;
+            --down: #b85c5c;
         }
         html, body, [data-testid="stAppViewContainer"] { background: var(--bg); }
         [data-testid="stAppViewContainer"] {
-            background:
-                radial-gradient(circle at 8% 9%, rgba(200,76,255,.26), transparent 23rem),
-                radial-gradient(circle at 95% 88%, rgba(33,212,253,.18), transparent 22rem),
-                #0c1020;
+            background: var(--bg);
         }
         .block-container {
             max-width: 1280px;
@@ -162,153 +158,153 @@ def _inject_style() -> None:
             padding-bottom: 2.8rem;
         }
         [data-testid="stSidebar"] {
-            background: #14182b;
-            border-right: 1px solid #272e48;
+            background: #141417;
+            border-right: 1px solid var(--line);
         }
         [data-testid="stSidebar"] * {
-            color: #e8edff;
+            color: var(--text);
         }
         [data-testid="stSidebar"] input,
         [data-testid="stSidebar"] textarea {
-            color: #f0f4ff !important;
-            background-color: #1e2440 !important;
-            border: 1px solid #3a4268 !important;
+            color: var(--text) !important;
+            background-color: var(--panel) !important;
+            border: 1px solid var(--line) !important;
         }
         [data-testid="stSidebar"] input::placeholder {
-            color: #6b7a9e !important;
+            color: #52525b !important;
         }
         [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
-            color: #a8b3cf;
+            color: var(--muted);
         }
         h1, h2, h3, h4, h5, h6, p, label, span {
             color: var(--text);
         }
         div[data-testid="stMetric"] {
-            background: linear-gradient(145deg, #171d33, #111629);
-            border: 1px solid #29304b;
-            border-radius: 14px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
             padding: 14px 16px;
-            box-shadow: 0 20px 44px rgba(0,0,0,.28);
+            box-shadow: none;
         }
         div[data-testid="stMetricLabel"] p {
-            color: #a8b3cf;
+            color: var(--muted);
             font-size: 0.82rem;
         }
         div[data-testid="stMetricValue"] {
-            color: #f8fbff;
-            font-weight: 700;
+            color: var(--text);
+            font-weight: 600;
         }
         .commodity-header {
-            background: linear-gradient(145deg, rgba(21,26,46,.96), rgba(11,15,29,.96));
-            border: 1px solid #2a3150;
-            border-radius: 24px;
-            padding: 26px 30px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 24px 28px;
             margin-bottom: 18px;
-            box-shadow: 0 28px 80px rgba(0,0,0,.35);
+            box-shadow: none;
         }
         .commodity-header h1 {
-            color: #f8fbff;
-            font-size: 2rem;
+            color: var(--text);
+            font-size: 1.6rem;
             margin: 0 0 4px 0;
-            letter-spacing: 0;
+            font-weight: 600;
+            letter-spacing: -0.01em;
         }
         .commodity-header p {
             margin: 0;
-            color: #9aa6c3;
+            color: var(--muted);
         }
         .side-title {
-            color: #f8fbff;
-            font-size: 1.15rem;
-            font-weight: 800;
+            color: var(--text);
+            font-size: 1.1rem;
+            font-weight: 600;
             margin: .3rem 0 .35rem 0;
         }
         .side-subtitle {
-            color: #8f9bb8;
+            color: var(--muted);
             font-size: .76rem;
             margin-bottom: 1.05rem;
         }
         .side-active {
-            background: linear-gradient(90deg, rgba(200,76,255,.45), rgba(33,212,253,.08));
-            border-left: 4px solid var(--purple);
-            border-radius: 8px;
-            color: #fff;
+            background: rgba(161, 161, 170, 0.08);
+            border-left: 3px solid var(--accent);
+            border-radius: 6px;
+            color: var(--text);
             font-size: .95rem;
-            font-weight: 800;
+            font-weight: 600;
             margin: .5rem 0 1rem 0;
             padding: .78rem .9rem;
         }
         .side-section {
-            border-top: 1px solid #282f48;
-            color: #aeb9d8;
-            font-size: .76rem;
-            font-weight: 800;
-            letter-spacing: .06em;
+            border-top: 1px solid var(--line);
+            color: var(--muted);
+            font-size: .72rem;
+            font-weight: 600;
+            letter-spacing: .08em;
             margin-top: 1rem;
             padding-top: 1rem;
             text-transform: uppercase;
         }
         .stat-card {
-            border: 1px solid rgba(255,255,255,.12);
-            border-radius: 14px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
             min-height: 126px;
             padding: 20px 22px;
-            box-shadow: 0 18px 42px rgba(0,0,0,.22);
+            box-shadow: none;
         }
         .stat-card.purple {
-            background: linear-gradient(135deg, #df58ff 0%, #8d62ff 100%);
+            background: var(--panel);
         }
         .stat-card.cyan {
-            background: linear-gradient(135deg, #19d5d2 0%, #4387ff 100%);
+            background: var(--panel);
         }
         .stat-card.dark {
-            background: linear-gradient(145deg, #171d33, #111629);
+            background: var(--panel);
         }
         .stat-label {
-            color: rgba(255,255,255,.78);
-            font-size: .84rem;
-            font-weight: 650;
+            color: var(--muted);
+            font-size: .82rem;
+            font-weight: 500;
             margin-bottom: 18px;
         }
         .stat-value {
-            color: #ffffff;
-            font-size: 2.1rem;
-            font-weight: 800;
+            color: var(--text);
+            font-size: 2rem;
+            font-weight: 600;
             line-height: 1;
         }
         .stat-sub {
-            color: rgba(255,255,255,.74);
+            color: var(--muted);
             font-size: .82rem;
             margin-left: .3rem;
         }
         .mini-card {
             align-items: center;
-            background: linear-gradient(145deg, #171d33, #111629);
-            border: 1px solid #29304b;
-            border-radius: 13px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
             display: flex;
             justify-content: space-between;
             min-height: 58px;
             padding: 12px 16px;
         }
-        .mini-card strong { color: #f8fbff; font-size: .86rem; }
+        .mini-card strong { color: var(--text); font-size: .86rem; }
         .mini-badge {
             border-radius: 999px;
-            color: #fff;
             font-size: .74rem;
-            font-weight: 800;
+            font-weight: 600;
             padding: 4px 10px;
         }
-        .mini-badge.up { background: rgba(33,212,253,.38); }
-        .mini-badge.down { background: rgba(255,91,200,.38); }
+        .mini-badge.up { background: rgba(107, 158, 122, 0.15); color: var(--up); }
+        .mini-badge.down { background: rgba(184, 92, 92, 0.15); color: var(--down); }
         .block-title {
-            color: #f8fbff;
+            color: var(--text);
             font-size: 1rem;
-            font-weight: 800;
+            font-weight: 600;
             margin: 18px 0 10px;
         }
         .help-line {
-            color: #a8b3cf;
-            font-size: .86rem;
+            color: var(--muted);
+            font-size: .84rem;
             margin: -4px 0 12px 0;
         }
         .legend-row {
@@ -318,26 +314,26 @@ def _inject_style() -> None:
             margin: 4px 0 14px;
         }
         .legend-pill {
-            background: #151a2e;
-            border: 1px solid #29304b;
+            background: var(--panel);
+            border: 1px solid var(--line);
             border-radius: 999px;
-            color: #dbe5ff;
+            color: var(--text);
             font-size: .8rem;
-            font-weight: 700;
+            font-weight: 500;
             padding: 7px 11px;
         }
-        .legend-pill.up { border-color: rgba(33,212,253,.55); color: #21d4fd; }
-        .legend-pill.down { border-color: rgba(255,91,200,.55); color: #ff5bc8; }
+        .legend-pill.up { border-color: rgba(107, 158, 122, 0.4); color: var(--up); }
+        .legend-pill.down { border-color: rgba(184, 92, 92, 0.4); color: var(--down); }
         .stPlotlyChart {
-            background: #151a2e;
-            border: 1px solid #29304b;
-            border-radius: 14px;
-            box-shadow: 0 18px 42px rgba(0,0,0,.18);
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            box-shadow: none;
             padding: 10px;
         }
         [data-testid="stDataFrame"] {
-            border: 1px solid #29304b;
-            border-radius: 14px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
             overflow: hidden;
         }
         div[data-testid="stSelectbox"],
@@ -345,24 +341,24 @@ def _inject_style() -> None:
         div[data-testid="stRadio"],
         div[data-testid="stTextInput"],
         div[data-testid="stMultiSelect"] {
-            color: #f8fbff;
+            color: var(--text);
         }
         /* Multiselect tag pills */
         [data-testid="stSidebar"] [data-testid="stMultiSelect"] span[data-baseweb="tag"] {
-            background-color: #2a3158 !important;
-            border: 1px solid #4a5280 !important;
-            color: #dbe5ff !important;
+            background-color: var(--panel) !important;
+            border: 1px solid var(--line) !important;
+            color: var(--text) !important;
         }
         [data-testid="stSidebar"] [data-testid="stMultiSelect"] span[data-baseweb="tag"] span {
-            color: #dbe5ff !important;
+            color: var(--text) !important;
         }
         [data-testid="stSidebar"] [data-testid="stMultiSelect"] span[data-baseweb="tag"] svg {
-            fill: #8f9bb8 !important;
+            fill: var(--muted) !important;
         }
         /* Multiselect dropdown background */
         [data-testid="stSidebar"] [data-testid="stMultiSelect"] > div > div {
-            background-color: #1e2440 !important;
-            border-color: #3a4268 !important;
+            background-color: var(--panel) !important;
+            border-color: var(--line) !important;
         }
         /* Fix overlapping input box inside multiselect/selectbox */
         [data-testid="stSidebar"] [data-testid="stMultiSelect"] input,
@@ -382,31 +378,31 @@ def _inject_style() -> None:
             margin: 18px 0 10px;
         }
         .live-dot {
-            width: 8px;
-            height: 8px;
-            background-color: var(--cyan);
+            width: 7px;
+            height: 7px;
+            background-color: var(--accent);
             border-radius: 50%;
             display: inline-block;
-            animation: livePulseDot 2s infinite ease-in-out;
+            animation: livePulseDot 2.5s infinite ease-in-out;
         }
         .live-title {
-            color: #f8fbff;
+            color: var(--text);
             font-size: 1rem;
-            font-weight: 800;
+            font-weight: 600;
             margin: 0;
         }
         @keyframes livePulseDot {
             0% {
                 transform: scale(0.9);
-                box-shadow: 0 0 0 0 rgba(33, 212, 253, 0.7);
+                box-shadow: 0 0 0 0 rgba(161, 161, 170, 0.4);
             }
             70% {
                 transform: scale(1);
-                box-shadow: 0 0 0 8px rgba(33, 212, 253, 0);
+                box-shadow: 0 0 0 5px rgba(161, 161, 170, 0);
             }
             100% {
                 transform: scale(0.9);
-                box-shadow: 0 0 0 0 rgba(33, 212, 253, 0);
+                box-shadow: 0 0 0 0 rgba(161, 161, 170, 0);
             }
         }
         </style>
@@ -421,113 +417,68 @@ def _inject_dynamic_animations() -> None:
     st.markdown(
         f"""
         <style>
-        /* ── Premium UI Micro-Animations ────────────────────────────────── */
-        @keyframes premiumPopUp_{anim_id} {{
+        /* -- Subtle entry animations ------------------------------------------------ */
+        @keyframes fadeUp_{anim_id} {{
             0% {{
                 opacity: 0;
-                transform: translateY(14px) scale(0.97);
-                filter: brightness(1.2) blur(1px);
-            }}
-            100% {{
-                opacity: 1;
-                transform: translateY(0) scale(1);
-                filter: brightness(1) blur(0);
-            }}
-        }}
-        @keyframes liveMetricUpdate_{anim_id} {{
-            0% {{
-                opacity: 0.7;
-                transform: scale(0.96);
-                border-color: var(--cyan);
-                box-shadow: 0 0 18px rgba(33, 212, 253, 0.4);
-            }}
-            40% {{
-                transform: scale(1.025);
-                border-color: var(--purple);
-                box-shadow: 0 0 22px rgba(200, 76, 255, 0.35);
-            }}
-            100% {{
-                opacity: 1;
-                transform: scale(1);
-                border-color: #29304b;
-                box-shadow: 0 20px 44px rgba(0,0,0,.28);
-            }}
-        }}
-        @keyframes chartUpdate_{anim_id} {{
-            0% {{
-                opacity: 0.8;
-                transform: scale(0.99);
-                border-color: var(--cyan);
-                box-shadow: 0 0 15px rgba(33, 212, 253, 0.22);
-            }}
-            100% {{
-                opacity: 1;
-                transform: scale(1);
-                border-color: #29304b;
-                box-shadow: 0 18px 42px rgba(0,0,0,.18);
-            }}
-        }}
-        @keyframes tableUpdate_{anim_id} {{
-            0% {{
-                opacity: 0.8;
-                transform: translateY(6px);
-                border-color: var(--purple);
-                box-shadow: 0 0 15px rgba(200, 76, 255, 0.22);
+                transform: translateY(8px);
             }}
             100% {{
                 opacity: 1;
                 transform: translateY(0);
-                border-color: #29304b;
-                box-shadow: none;
+            }}
+        }}
+        @keyframes fadeIn_{anim_id} {{
+            0% {{ opacity: 0.75; }}
+            100% {{ opacity: 1; }}
+        }}
+        @keyframes slideUp_{anim_id} {{
+            0% {{
+                opacity: 0.8;
+                transform: translateY(4px);
+            }}
+            100% {{
+                opacity: 1;
+                transform: translateY(0);
             }}
         }}
 
-        /* ── Applying Animations ── */
+        /* -- Apply animations ------------------------------------------------------- */
         .commodity-header {{
-            animation: premiumPopUp_{anim_id} 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation: fadeUp_{anim_id} 0.4s ease-out both;
         }}
-        .stat-card.purple {{
-            animation: premiumPopUp_{anim_id} 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
-            animation-delay: 0.04s;
-        }}
-        .stat-card.cyan {{
-            animation: premiumPopUp_{anim_id} 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
-            animation-delay: 0.08s;
-        }}
-        .stat-card.dark {{
-            animation: premiumPopUp_{anim_id} 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
-            animation-delay: 0.12s;
+        .stat-card {{
+            animation: fadeUp_{anim_id} 0.42s ease-out both;
+            animation-delay: 0.03s;
         }}
         .mini-card {{
-            animation: premiumPopUp_{anim_id} 0.58s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation: fadeUp_{anim_id} 0.42s ease-out both;
         }}
-        .mini-card:nth-of-type(1) {{ animation-delay: 0.12s; }}
-        .mini-card:nth-of-type(2) {{ animation-delay: 0.16s; }}
+        .mini-card:nth-of-type(1) {{ animation-delay: 0.06s; }}
+        .mini-card:nth-of-type(2) {{ animation-delay: 0.09s; }}
 
-        /* Form Controls staggered load */
         div[data-testid="stSelectbox"],
         div[data-testid="stSlider"],
         div[data-testid="stRadio"],
         div[data-testid="stTextInput"],
         div[data-testid="stMultiSelect"] {{
-            animation: premiumPopUp_{anim_id} 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
-            animation-delay: 0.18s;
+            animation: fadeUp_{anim_id} 0.45s ease-out both;
+            animation-delay: 0.1s;
         }}
 
-        /* Live fragments entry & update animations */
         div[data-testid="stMetric"] {{
-            animation: liveMetricUpdate_{anim_id} 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+            animation: fadeIn_{anim_id} 0.35s ease-out both;
         }}
         div[data-testid="stMetric"]:nth-of-type(1) {{ animation-delay: 0s; }}
-        div[data-testid="stMetric"]:nth-of-type(2) {{ animation-delay: 0.04s; }}
-        div[data-testid="stMetric"]:nth-of-type(3) {{ animation-delay: 0.08s; }}
-        div[data-testid="stMetric"]:nth-of-type(4) {{ animation-delay: 0.12s; }}
+        div[data-testid="stMetric"]:nth-of-type(2) {{ animation-delay: 0.03s; }}
+        div[data-testid="stMetric"]:nth-of-type(3) {{ animation-delay: 0.06s; }}
+        div[data-testid="stMetric"]:nth-of-type(4) {{ animation-delay: 0.09s; }}
 
         .stPlotlyChart {{
-            animation: chartUpdate_{anim_id} 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation: fadeIn_{anim_id} 0.45s ease-out both;
         }}
         [data-testid="stDataFrame"] {{
-            animation: tableUpdate_{anim_id} 0.62s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation: slideUp_{anim_id} 0.45s ease-out both;
         }}
         </style>
         """,
@@ -571,18 +522,18 @@ def _help_line(text: str) -> None:
 def _dark_layout(fig, height: int, extra_right: int = 0, extra_bottom: int = 0):
     fig.update_layout(
         height=height,
-        paper_bgcolor="#151a2e",
-        plot_bgcolor="#151a2e",
-        font=dict(color="#dbe5ff"),
+        paper_bgcolor="#19191f",
+        plot_bgcolor="#19191f",
+        font=dict(color="#d4d4d8"),
         margin=dict(l=10, r=10 + extra_right, t=44, b=10 + extra_bottom),
         legend=dict(
             bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#aeb9d8"),
+            font=dict(color="#71717a"),
             itemwidth=30,
         ),
-        title_font=dict(color="#f8fbff", size=15),
-        xaxis=dict(gridcolor="#2c3450", zerolinecolor="#2c3450"),
-        yaxis=dict(gridcolor="#2c3450", zerolinecolor="#2c3450"),
+        title_font=dict(color="#d4d4d8", size=15),
+        xaxis=dict(gridcolor="#27272e", zerolinecolor="#27272e"),
+        yaxis=dict(gridcolor="#27272e", zerolinecolor="#27272e"),
     )
     return fig
 
@@ -604,67 +555,34 @@ def _live_market_stream(latest_df: pd.DataFrame) -> None:
     st.markdown(
         f"""
         <style>
-        @keyframes liveMetricUpdate_{update_id} {{
-            0% {{
-                opacity: 0.7;
-                transform: scale(0.96);
-                border-color: var(--cyan);
-                box-shadow: 0 0 18px rgba(33, 212, 253, 0.4);
-            }}
-            40% {{
-                transform: scale(1.025);
-                border-color: var(--purple);
-                box-shadow: 0 0 22px rgba(200, 76, 255, 0.35);
-            }}
-            100% {{
-                opacity: 1;
-                transform: scale(1);
-                border-color: #29304b;
-                box-shadow: 0 20px 44px rgba(0,0,0,.28);
-            }}
+        @keyframes fadeIn_{update_id} {{
+            0% {{ opacity: 0.75; }}
+            100% {{ opacity: 1; }}
         }}
-        @keyframes chartUpdate_{update_id} {{
+        @keyframes slideUp_{update_id} {{
             0% {{
                 opacity: 0.8;
-                transform: scale(0.99);
-                border-color: var(--cyan);
-                box-shadow: 0 0 15px rgba(33, 212, 253, 0.22);
-            }}
-            100% {{
-                opacity: 1;
-                transform: scale(1);
-                border-color: #29304b;
-                box-shadow: 0 18px 42px rgba(0,0,0,.18);
-            }}
-        }}
-        @keyframes tableUpdate_{update_id} {{
-            0% {{
-                opacity: 0.8;
-                transform: translateY(6px);
-                border-color: var(--purple);
-                box-shadow: 0 0 15px rgba(200, 76, 255, 0.22);
+                transform: translateY(4px);
             }}
             100% {{
                 opacity: 1;
                 transform: translateY(0);
-                border-color: #29304b;
-                box-shadow: none;
             }}
         }}
-        
+
         div[data-testid="stMetric"] {{
-            animation: liveMetricUpdate_{update_id} 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+            animation: fadeIn_{update_id} 0.35s ease-out both;
         }}
         div[data-testid="stMetric"]:nth-of-type(1) {{ animation-delay: 0s; }}
-        div[data-testid="stMetric"]:nth-of-type(2) {{ animation-delay: 0.04s; }}
-        div[data-testid="stMetric"]:nth-of-type(3) {{ animation-delay: 0.08s; }}
-        div[data-testid="stMetric"]:nth-of-type(4) {{ animation-delay: 0.12s; }}
+        div[data-testid="stMetric"]:nth-of-type(2) {{ animation-delay: 0.03s; }}
+        div[data-testid="stMetric"]:nth-of-type(3) {{ animation-delay: 0.06s; }}
+        div[data-testid="stMetric"]:nth-of-type(4) {{ animation-delay: 0.09s; }}
 
         .stPlotlyChart {{
-            animation: chartUpdate_{update_id} 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation: fadeIn_{update_id} 0.45s ease-out both;
         }}
         [data-testid="stDataFrame"] {{
-            animation: tableUpdate_{update_id} 0.62s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation: slideUp_{update_id} 0.45s ease-out both;
         }}
         </style>
         """,
@@ -675,12 +593,12 @@ def _live_market_stream(latest_df: pd.DataFrame) -> None:
         """
         <div class="live-indicator-container">
             <span class="live-dot"></span>
-            <span class="live-title">📡 Live Prices</span>
+            <span class="live-title">Live Prices</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    _help_line("Prices update every 30 seconds from Finnhub. Green = price went up · Red = price went down.")
+    _help_line("Prices update every 30 seconds from Finnhub. Green = price went up, Red = price went down.")
 
     previous_prices = st.session_state.setdefault("live_previous_prices", {})
     history = st.session_state.setdefault("live_stream_history", [])
@@ -733,11 +651,11 @@ def _live_market_stream(latest_df: pd.DataFrame) -> None:
     flat_count = int((live_df["vs Close"] == "FLAT").sum())
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Stocks Tracked", len(live_df))
-    c2.metric("📈 Going Up", up_count)
-    c3.metric("📉 Going Down", down_count)
-    c4.metric("➡️ Unchanged", flat_count)
+    c2.metric("Going Up", up_count)
+    c3.metric("Going Down", down_count)
+    c4.metric("Unchanged", flat_count)
 
-    # ── Live price chart ──
+    # -- Live price chart --
     chart_df = pd.DataFrame(st.session_state["live_stream_history"])
     if not chart_df.empty:
         fig = px.line(
@@ -759,11 +677,11 @@ def _live_market_stream(latest_df: pd.DataFrame) -> None:
                 "day_change": ":+,.2f",
                 "day_change_pct": ":+,.2f",
             },
-            color_discrete_sequence=["#21d4fd", "#c84cff", "#ff5bc8", "#7c8cff", "#22e6a8", "#f6b44b"],
+            color_discrete_sequence=["#8eaadc", "#a78bba", "#9ec5a0", "#d4a06a", "#c48888", "#7cb8b2"],
         )
         st.plotly_chart(_dark_layout(fig, 310), width="stretch")
 
-    # ── Live price table ──
+    # -- Live price table --
     display_cols = [
         "Ticker", "Company", "Price (USD)", "vs Close", "Day Change", "Day %",
         "Since Last Update", "Trend", "Prev Close", "Source", "Last Updated",
@@ -785,7 +703,7 @@ def _live_market_stream(latest_df: pd.DataFrame) -> None:
         height=360,
     )
 
-    st.caption(f"⏱ Last updated at {timestamp.strftime('%H:%M:%S')} · Only this section refreshes automatically.")
+    st.caption(f"Last updated at {timestamp.strftime('%H:%M:%S')} \u00b7 Only this section refreshes automatically.")
 
 
 @st.cache_data(ttl=300)
@@ -840,8 +758,8 @@ def _create_forecast_chart(hist_df: pd.DataFrame, pred_df: pd.DataFrame, ticker:
             y=h_sub[indicator],
             mode="lines+markers",
             name=f"Historical {ind_label}",
-            line=dict(color="#c84cff", width=3, shape="spline"),
-            marker=dict(size=6),
+            line=dict(color="#a78bba", width=2, shape="spline"),
+            marker=dict(size=5),
             hovertemplate="Date: %{x}<br>Price: $%{y:,.2f}<extra>History</extra>"
         ))
 
@@ -869,14 +787,14 @@ def _create_forecast_chart(hist_df: pd.DataFrame, pred_df: pd.DataFrame, ticker:
             showlegend=False,
             hovertemplate="Lower Bound: $%{y:,.2f}<extra></extra>"
         ))
-        
+
         # Upper bound line with fill to previous trace
         fig.add_trace(go.Scatter(
             x=p_sub_plot["predicted_time"],
             y=p_sub_plot["confidence_high"],
             mode="lines",
             fill="tonexty",
-            fillcolor="rgba(33, 212, 253, 0.12)",
+            fillcolor="rgba(142, 170, 220, 0.08)",
             line=dict(width=0, shape="spline"),
             name="95% Confidence Interval",
             hovertemplate="Upper Bound: $%{y:,.2f}<extra></extra>"
@@ -888,23 +806,23 @@ def _create_forecast_chart(hist_df: pd.DataFrame, pred_df: pd.DataFrame, ticker:
             y=p_sub_plot["predicted_value"],
             mode="lines+markers",
             name=f"Forecast ({model_name})",
-            line=dict(color="#21d4fd", width=3, dash="dash", shape="spline"),
-            marker=dict(size=7, symbol="diamond"),
+            line=dict(color="#8eaadc", width=2, dash="dash", shape="spline"),
+            marker=dict(size=6, symbol="diamond"),
             hovertemplate="Date: %{x}<br>Forecast: $%{y:,.2f}<extra>Prediction</extra>"
         ))
 
     model_title = "Linear Trend" if model_name == "linear_trend" else "Holt's Smoothing"
     fig.update_layout(
-        title=f"🔮 {ticker} {ind_label} Forecast using {model_title}",
+        title=f"{ticker} {ind_label} Forecast \u2014 {model_title}",
         xaxis=dict(
             title="Time",
-            gridcolor="#222b45",
+            gridcolor="#27272e",
             type="date",
         ),
         yaxis=dict(
             title="Price (USD)",
             tickformat="$",
-            gridcolor="#222b45",
+            gridcolor="#27272e",
         ),
         legend=dict(
             orientation="h",
@@ -947,14 +865,14 @@ def main() -> None:
     all_categories = sorted(df["commodity_category"].dropna().unique().tolist())
 
     with st.sidebar:
-        st.markdown('<div class="side-title">📊 Stock Dashboard</div>', unsafe_allow_html=True)
+        st.markdown('<div class="side-title">Stock Dashboard</div>', unsafe_allow_html=True)
         st.markdown('<div class="side-subtitle">Real-time prices from Finnhub API</div>', unsafe_allow_html=True)
-        
+
         # Navigation toggle
         st.markdown('<div class="side-section">Navigation</div>', unsafe_allow_html=True)
         selected_view = st.radio(
             "Select View",
-            ["📡 Live & History", "🔮 ML Forecasting"],
+            ["Live & History", "ML Forecasting"],
             label_visibility="collapsed",
             key="side_view_selector",
         )
@@ -984,7 +902,7 @@ def main() -> None:
 
         all_dates = sorted(df_tf["time_index"].dropna().unique().tolist())
 
-        if selected_view == "📡 Live & History":
+        if selected_view == "Live & History":
             st.markdown('<div class="side-section">Filter Stocks</div>', unsafe_allow_html=True)
             selected_categories = st.multiselect(
                 "Filter by sector",
@@ -992,7 +910,7 @@ def main() -> None:
                 default=all_categories,
                 help="Choose which market sectors to display",
             )
-            
+
             # Stretches range slider over date domain
             min_date = pd.to_datetime(all_dates[0]).date()
             max_date = pd.to_datetime(all_dates[-1]).date()
@@ -1006,14 +924,14 @@ def main() -> None:
                 value=(min_date, max_date),
                 help="Filter the historical price charts below",
             )
-            
+
             search_text = st.text_input("Search by ticker or company", placeholder="e.g. AAPL or Apple")
             if search_text:
                 match_count = df_tf[
                     df_tf["symbol"].str.contains(search_text, case=False, na=False)
                     | df_tf["commodity_name"].str.contains(search_text, case=False, na=False)
                 ]["symbol"].nunique()
-                st.caption(f"🔍 Found {match_count} matching stock{'s' if match_count != 1 else ''}.")
+                st.caption(f"Found {match_count} matching stock{'s' if match_count != 1 else ''}.")
 
             st.markdown('<div class="side-section">How it works</div>', unsafe_allow_html=True)
             st.caption("The Live Prices section updates automatically every 30 seconds without refreshing the full page.")
@@ -1021,12 +939,12 @@ def main() -> None:
             st.markdown('<div class="side-section">ML Predictions</div>', unsafe_allow_html=True)
             st.caption("Forecasting models are automatically fit, evaluated, and logged to MLflow via the containerized ML pipeline.")
 
-    if selected_view == "📡 Live & History":
+    if selected_view == "Live & History":
         filtered_df = df_tf[
             df_tf["commodity_category"].isin(selected_categories)
             & pd.to_datetime(df_tf["time_index"]).dt.date.between(date_range[0], date_range[1])
         ].copy()
-        
+
         if search_text:
             filtered_df = filtered_df[
                 filtered_df["symbol"].str.contains(search_text, case=False, na=False)
@@ -1047,7 +965,7 @@ def main() -> None:
         st.markdown(
             f"""
             <div class="commodity-header">
-                <h1>📈 Stock Market Dashboard ({selected_tf_label})</h1>
+                <h1>Stock Market Dashboard ({selected_tf_label})</h1>
                 <p>Track live stock prices, compare trends, and monitor your watchlist — powered by Finnhub.</p>
             </div>
             """,
@@ -1070,11 +988,11 @@ def main() -> None:
 
         bottom_left, bottom_right = st.columns([1.55, 1])
         with bottom_left:
-            _block_title(f"📊 Price History ({selected_tf_label})")
+            _block_title(f"Price History ({selected_tf_label})")
             _help_line("How stock prices have changed over time. Smooth spline curves make trends easy to follow.")
-            
+
             all_symbols_in_filters = sorted(filtered_df["symbol"].unique())
-            
+
             c_sel1, c_sel2 = st.columns([2.2, 1])
             with c_sel1:
                 selected_symbols_history = st.multiselect(
@@ -1096,12 +1014,12 @@ def main() -> None:
                     }.get(x, x),
                     help="Select which price point to plot"
                 )
-            
+
             history_plot_df = filtered_df[filtered_df["symbol"].isin(selected_symbols_history)].copy()
 
             if not history_plot_df.empty:
                 fig = go.Figure()
-                
+
                 is_single = len(selected_symbols_history) == 1
                 metric_label = {
                     "close_price": "Close Price",
@@ -1111,33 +1029,33 @@ def main() -> None:
                 }.get(selected_metric, selected_metric)
 
                 CHART_THEMES = [
-                    {"line": "#21d4fd", "fill": "rgba(33, 212, 253, 0.12)"},
-                    {"line": "#c84cff", "fill": "rgba(200, 76, 255, 0.12)"},
-                    {"line": "#ff5bc8", "fill": "rgba(255, 91, 200, 0.12)"},
-                    {"line": "#7c8cff", "fill": "rgba(124, 140, 255, 0.12)"},
-                    {"line": "#22e6a8", "fill": "rgba(34, 230, 168, 0.12)"},
-                    {"line": "#f6b44b", "fill": "rgba(246, 180, 75, 0.12)"},
-                    {"line": "#ff4b4b", "fill": "rgba(255, 75, 75, 0.12)"},
-                    {"line": "#1cdb6d", "fill": "rgba(28, 219, 109, 0.12)"},
+                    {"line": "#8eaadc", "fill": "rgba(142, 170, 220, 0.06)"},
+                    {"line": "#a78bba", "fill": "rgba(167, 139, 186, 0.06)"},
+                    {"line": "#9ec5a0", "fill": "rgba(158, 197, 160, 0.06)"},
+                    {"line": "#d4a06a", "fill": "rgba(212, 160, 106, 0.06)"},
+                    {"line": "#c48888", "fill": "rgba(196, 136, 136, 0.06)"},
+                    {"line": "#7cb8b2", "fill": "rgba(124, 184, 178, 0.06)"},
+                    {"line": "#b8b88e", "fill": "rgba(184, 184, 142, 0.06)"},
+                    {"line": "#a1a1aa", "fill": "rgba(161, 161, 170, 0.06)"},
                 ]
-                
+
                 for idx, sym in enumerate(selected_symbols_history):
                     sym_df = history_plot_df[history_plot_df["symbol"] == sym].sort_values("time_index")
                     if sym_df.empty:
                         continue
-                    
+
                     theme = CHART_THEMES[idx % len(CHART_THEMES)]
                     color = theme["line"]
                     fill_color = theme["fill"]
-                    
+
                     if is_single:
                         fig.add_trace(go.Scatter(
                             x=sym_df["time_index"],
                             y=sym_df[selected_metric],
                             mode="lines+markers",
                             name=f"{sym} ({metric_label})",
-                            line=dict(color=color, width=3.5, shape="spline"),
-                            marker=dict(size=8, symbol="circle", line=dict(color="#151a2e", width=1.5)),
+                            line=dict(color=color, width=2, shape="spline"),
+                            marker=dict(size=5, symbol="circle", line=dict(color="#19191f", width=1)),
                             fill="tozeroy",
                             fillcolor=fill_color,
                             hovertemplate=f"<b>{sym}</b><br>Date: %{{x}}<br>{metric_label}: $%{{y:,.2f}}<extra></extra>"
@@ -1148,27 +1066,27 @@ def main() -> None:
                             y=sym_df[selected_metric],
                             mode="lines+markers",
                             name=sym,
-                            line=dict(color=color, width=3, shape="spline"),
-                            marker=dict(size=7, symbol="circle", line=dict(color="#151a2e", width=1)),
+                            line=dict(color=color, width=2, shape="spline"),
+                            marker=dict(size=5, symbol="circle", line=dict(color="#19191f", width=1)),
                             hovertemplate=f"<b>{sym}</b><br>Date: %{{x}}<br>{metric_label}: $%{{y:,.2f}}<extra></extra>"
                         ))
-                
+
                 fig.update_layout(
                     title=dict(
-                        text=f"📈 Historical {metric_label} Trends ({selected_tf_label})",
-                        font=dict(color="#f8fbff", size=16, weight="bold")
+                        text=f"Historical {metric_label} Trends ({selected_tf_label})",
+                        font=dict(color="#d4d4d8", size=15, weight="bold")
                     ),
                     xaxis=dict(
-                        title=dict(text="Date", font=dict(color="#aeb9d8")),
+                        title=dict(text="Date", font=dict(color="#71717a")),
                         type="date",
-                        gridcolor="#222b45",
-                        tickfont=dict(color="#aeb9d8")
+                        gridcolor="#27272e",
+                        tickfont=dict(color="#71717a")
                     ),
                     yaxis=dict(
-                        title=dict(text="Price (USD)", font=dict(color="#aeb9d8")),
+                        title=dict(text="Price (USD)", font=dict(color="#71717a")),
                         tickformat="$",
-                        gridcolor="#222b45",
-                        tickfont=dict(color="#aeb9d8")
+                        gridcolor="#27272e",
+                        tickfont=dict(color="#71717a")
                     ),
                     legend=dict(
                         orientation="h",
@@ -1176,18 +1094,18 @@ def main() -> None:
                         y=1.04,
                         xanchor="right",
                         x=1,
-                        font=dict(color="#aeb9d8", size=11)
+                        font=dict(color="#71717a", size=11)
                     ),
                     margin=dict(l=15, r=15, t=65, b=15),
                     hovermode="x unified"
                 )
-                
+
                 st.plotly_chart(_dark_layout(fig, 330, extra_right=0), width="stretch")
             else:
                 st.info("Select at least one stock to plot the price history.")
 
         with bottom_right:
-            _block_title("🏷️ Sector Breakdown")
+            _block_title("Sector Breakdown")
             _help_line("How many stocks belong to each market sector.")
             sector_counts = latest_df.groupby("commodity_category", as_index=False).agg(count=("symbol", "count"))
             sector_counts = sector_counts.rename(columns={"commodity_category": "Sector"})
@@ -1197,9 +1115,9 @@ def main() -> None:
                 values="count",
                 hole=0.62,
                 title="Stocks by Sector",
-                color_discrete_sequence=["#21d4fd", "#c84cff", "#ff5bc8", "#376dff", "#22e6a8"],
+                color_discrete_sequence=["#8eaadc", "#a78bba", "#9ec5a0", "#d4a06a", "#c48888"],
             )
-            pie.update_traces(textfont_color="#f8fbff")
+            pie.update_traces(textfont_color="#d4d4d8")
             st.plotly_chart(_dark_layout(pie, 360, extra_right=30, extra_bottom=30), width="stretch")
     else:
         # ML forecasting page
@@ -1216,7 +1134,7 @@ def main() -> None:
         st.markdown(
             f"""
             <div class="commodity-header">
-                <h1>🔮 ML Price Forecasting ({selected_tf_label})</h1>
+                <h1>ML Price Forecasting ({selected_tf_label})</h1>
                 <p>Track advanced predictive analytics driven by Linear Trend and Holt's Exponential Smoothing models — logged via MLflow.</p>
             </div>
             """,
@@ -1262,11 +1180,11 @@ def main() -> None:
 
         # Load run metadata
         ticker_preds = pred_df_tf[
-            (pred_df_tf["symbol"] == selected_ticker) & 
-            (pred_df_tf["indicator"] == selected_indicator) & 
+            (pred_df_tf["symbol"] == selected_ticker) &
+            (pred_df_tf["indicator"] == selected_indicator) &
             (pred_df_tf["model_name"] == selected_model_raw)
         ]
-        
+
         f_top1, f_top2 = st.columns(2)
         if not ticker_preds.empty:
             run_at_val = pd.to_datetime(ticker_preds["run_at"].iloc[0]).tz_convert("Asia/Phnom_Penh").strftime("%Y-%m-%d %H:%M:%S")
@@ -1274,18 +1192,18 @@ def main() -> None:
                 _stat_card("Active Forecast Model", model_name_map.get(selected_model_raw, selected_model_raw), f" ({selected_ticker})", "purple")
             with f_top2:
                 _stat_card("Last Pipeline Run Time", run_at_val, " (Phnom Penh)", "cyan")
-        
+
         # Joined visual timeline chart
-        st.markdown('<div class="block-title">📊 Forecast Projections Timeline</div>', unsafe_allow_html=True)
-        st.markdown('<p class="help-line">History line (solid purple) joined seamlessly with forecasting line (dashed cyan) surrounded by a 95% confidence interval shaded glow.</p>', unsafe_allow_html=True)
-        
+        st.markdown('<div class="block-title">Forecast Projections Timeline</div>', unsafe_allow_html=True)
+        st.markdown('<p class="help-line">History line (solid) joined seamlessly with forecasting line (dashed) surrounded by a 95% confidence interval shaded region.</p>', unsafe_allow_html=True)
+
         fig = _create_forecast_chart(df, pred_df_tf, selected_ticker, selected_indicator, selected_model_raw, selected_tf)
         st.plotly_chart(_dark_layout(fig, 380, extra_right=30), width="stretch")
 
         # Table of forecast values
-        st.markdown('<div class="block-title">📋 Detailed Forecast Values</div>', unsafe_allow_html=True)
+        st.markdown('<div class="block-title">Detailed Forecast Values</div>', unsafe_allow_html=True)
         st.markdown('<p class="help-line">Exact values and confidence boundaries for the projected 3-period horizon. Spread % represents bound uncertainty.</p>', unsafe_allow_html=True)
-        
+
         if not ticker_preds.empty:
             display_preds = ticker_preds[["predicted_time", "predicted_value", "confidence_low", "confidence_high"]].copy()
             # Convert values to float
@@ -1295,7 +1213,7 @@ def main() -> None:
             display_preds["Confidence Spread %"] = (
                 (display_preds["confidence_high"] - display_preds["confidence_low"]) / display_preds["predicted_value"] * 100
             )
-            
+
             # Format columns
             display_preds = display_preds.rename(columns={
                 "predicted_time": "Projected Date",
@@ -1303,9 +1221,9 @@ def main() -> None:
                 "confidence_low": "Lower Confidence Bound",
                 "confidence_high": "Upper Confidence Bound",
             })
-            
+
             display_preds.index = range(1, len(display_preds) + 1)
-            
+
             st.dataframe(
                 display_preds.style.format({
                     "Forecasted Price (USD)": "${:,.2f}",
