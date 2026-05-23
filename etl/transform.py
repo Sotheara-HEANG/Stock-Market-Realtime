@@ -5,7 +5,7 @@ Pipeline:
     pandas DFs (extract.py)
         → Spark DFs (pandas_to_spark)
         → unified long Spark DF (union_sources)       # all rows, all indicators
-        → wide Spark DF (pivot_wide)                  # one row per entity+year, indicators as columns
+        → wide Spark DF (pivot_wide)                  # one row per entity+timeframe+time_index, indicators as columns
 
 Usage:
     from etl.transform import transform
@@ -30,8 +30,8 @@ from pyspark.sql.types import (
     DoubleType,
     IntegerType,
     StringType,
-    StructField,
     StructType,
+    StructField,
 )
 
 warnings.filterwarnings("ignore")
@@ -133,7 +133,6 @@ def get_spark() -> SparkSession:
             SparkSession.builder
             .appName("finnhub-trading-pipeline")
             .config("spark.sql.session.timeZone", "UTC")
-            # Reduce default shuffle partitions for local single-node runs
             .config("spark.sql.shuffle.partitions", "8")
             .config("spark.pyspark.python", sys.executable)
             .config("spark.pyspark.driver.python", sys.executable)
@@ -144,14 +143,15 @@ def get_spark() -> SparkSession:
 
 
 # ---------------------------------------------------------------------------
-# Schema — all sources share this 6-column structure after extract.py
+# Schema — all sources share this 7-column structure after extract.py
 # ---------------------------------------------------------------------------
 
 LONG_SCHEMA = StructType([
     StructField("country_code", StringType(),  nullable=True),
     StructField("country_name", StringType(),  nullable=True),
     StructField("indicator",    StringType(),  nullable=False),
-    StructField("year",         IntegerType(), nullable=False),
+    StructField("timeframe",    StringType(),  nullable=False),
+    StructField("time_index",   StringType(),  nullable=False),
     StructField("value",        DoubleType(),  nullable=True),
     StructField("source",       StringType(),  nullable=True),
 ])
@@ -164,15 +164,13 @@ LONG_SCHEMA = StructType([
 def pandas_to_spark(pdf: pd.DataFrame, spark: SparkSession) -> DataFrame:
     """
     Convert a single extract.py pandas DataFrame to a Spark DataFrame.
-
-    Coerces dtypes to match LONG_SCHEMA before conversion so Spark doesn't
-    infer mixed types (common with object columns containing empty strings).
     """
     pdf = pdf.copy()
     pdf["country_code"] = pdf["country_code"].astype(str).replace("nan", "")
     pdf["country_name"] = pdf["country_name"].astype(str).replace("nan", "")
     pdf["indicator"]    = pdf["indicator"].astype(str)
-    pdf["year"]         = pd.to_numeric(pdf["year"], errors="coerce").astype("Int64")
+    pdf["timeframe"]    = pdf["timeframe"].astype(str)
+    pdf["time_index"]   = pdf["time_index"].astype(str)
     pdf["value"]        = pd.to_numeric(pdf["value"], errors="coerce")
     pdf["source"]       = pdf["source"].astype(str)
 
@@ -199,8 +197,6 @@ def to_spark_dict(
 def union_sources(spark_dfs: dict[str, DataFrame]) -> DataFrame:
     """
     Stack all per-source Spark DataFrames into a single long-format DF.
-
-    All sources share the same 6-column schema, so this is a simple unionAll.
     """
     frames = list(spark_dfs.values())
     if not frames:
@@ -216,27 +212,24 @@ def union_sources(spark_dfs: dict[str, DataFrame]) -> DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Merge step 2: pivot long → wide (one row per country + year)
+# Merge step 2: pivot long → wide (one row per country + timeframe + time_index)
 # ---------------------------------------------------------------------------
 
 def pivot_wide(long_df: DataFrame) -> DataFrame:
     """
     Pivot the unified long DF to a wide format:
-        (country_code, country_name, year) → one column per indicator
-
-    For the trading pipeline, country_code carries the ticker and country_name
-    carries the company display name.
+        (country_code, country_name, timeframe, time_index) → one column per indicator
     """
     wide_df = (
         long_df
-        .groupBy("country_code", "country_name", "year")
+        .groupBy("country_code", "country_name", "timeframe", "time_index")
         .pivot("indicator")
         .agg(F.first("value"))
     )
 
     all_cols = sorted(
         set(wide_df.columns),
-        key=lambda c: (c not in ("country_code", "country_name", "year"), c),
+        key=lambda c: (c not in ("country_code", "country_name", "timeframe", "time_index"), c),
     )
     wide_df = wide_df.select(all_cols)
 
@@ -244,130 +237,64 @@ def pivot_wide(long_df: DataFrame) -> DataFrame:
     return wide_df
 
 
-def __window_by(partition_col: str, order_by: str, desc: bool = True):
-    from pyspark.sql.window import Window
-    w = Window.partitionBy(partition_col)
-    col = F.col(order_by)
-    return w.orderBy(col.desc() if desc else col)
-
-
-# ---------------------------------------------------------------------------
-# Clean step 1: normalise country names
-# ---------------------------------------------------------------------------
-
 # Canonical names keyed by ISO-3 / Polity scode.
-# Derived from inspecting all 31 real conflicts found across WGI, IMF,
-# Polity5, V-Dem sources (run: python3 -c "from etl.transform import ...").
+# Derived from WGI, IMF, Polity5, V-Dem sources for legacy backwards compatibility.
 CANONICAL_NAMES: dict[str, str] = {
-    # Polity5 maps AUS to both Australia and Austria — AUT is the correct code for Austria
     "AUS": "Australia",
     "AUT": "Austria",
-    # Congo disambiguation
     "COD": "Democratic Republic of Congo",
     "COG": "Republic of Congo",
-    "CON": "Republic of Congo",          # Polity5 scode for COG
-    # Cape Verde — official UN name since 2013
+    "CON": "Republic of Congo",
     "CPV": "Cabo Verde",
-    # Czech Republic → Czechia (official since 2016); CZE also appears as Czechoslovakia in old Polity5 rows
     "CZE": "Czechia",
-    # Egypt
     "EGY": "Egypt",
-    # Gambia
     "GMB": "Gambia",
-    # Germany — GMY is the Polity5 scode; Prussia is historical
     "GMY": "Germany",
-    # Hong Kong
     "HKG": "Hong Kong SAR, China",
-    # Iran
     "IRN": "Iran",
-    # Côte d'Ivoire — IVO is Polity5 scode
     "IVO": "Côte d'Ivoire",
     "CIV": "Côte d'Ivoire",
-    # Kyrgyzstan
     "KGZ": "Kyrgyzstan",
-    # Korea
     "KOR": "South Korea",
     "PRK": "North Korea",
-    # Laos
     "LAO": "Laos",
-    # Macao vs Macedonia — MAC is the ISO-3 for Macao; Macedonia is MKD
     "MAC": "Macao SAR, China",
     "MKD": "North Macedonia",
-    # Palestine
     "PSE": "Palestine",
-    # Russia
     "RUS": "Russia",
-    # Sudan — SDN/Sudan-North split handled by keeping Sudan
     "SDN": "Sudan",
-    # El Salvador vs Slovenia — SLV is ISO-3 for El Salvador; Slovenia is SVN
     "SLV": "El Salvador",
     "SVN": "Slovenia",
-    # Somalia
     "SOM": "Somalia",
-    # Slovakia
     "SVK": "Slovakia",
-    # Eswatini vs Switzerland — SWZ is ISO-3 for Eswatini; Switzerland is CHE
     "SWZ": "Eswatini",
     "CHE": "Switzerland",
-    # Syria
     "SYR": "Syria",
-    # Timor-Leste
     "TLS": "Timor-Leste",
-    # Turkey / Türkiye — official UN name change 2022; using Turkiye for consistency
     "TUR": "Turkiye",
-    # Venezuela
     "VEN": "Venezuela",
-    # Vietnam
     "VNM": "Vietnam",
-    # Yemen
     "YEM": "Yemen",
-    # Yugoslavia — historical; YGS is Polity5 scode
     "YGS": "Yugoslavia",
-    # Bahamas
     "BHS": "Bahamas",
-    # Bolivia
     "BOL": "Bolivia",
-    # Brunei
     "BRN": "Brunei",
-    # Kyrgyzstan (alternate Polity5 scode)
     "KYR": "Kyrgyzstan",
-    # Serbia and Montenegro (historical)
     "SRB": "Serbia",
 }
+
 
 def normalize_country_names(long_df: DataFrame) -> DataFrame:
     """
     Apply CANONICAL_NAMES to the long DF before pivoting.
-
-    For each row, if the country_code exists in the map, replace country_name
-    with the canonical value. Rows whose code is not in the map are unchanged.
-    Logs the number of rows updated.
     """
-    # Build the map expression here (requires an active SparkSession)
     name_map = F.create_map(
         *[x for pair in ((F.lit(k), F.lit(v)) for k, v in CANONICAL_NAMES.items()) for x in pair]
     )
-
     corrected = long_df.withColumn(
         "country_name",
         F.coalesce(name_map[F.col("country_code")], F.col("country_name")),
     )
-
-    # Count how many rows had their name changed
-    changed = (
-        long_df.select("country_code", "country_name")
-        .join(
-            corrected.select(
-                F.col("country_code").alias("cc"),
-                F.col("country_name").alias("new_name"),
-            ),
-            long_df["country_code"] == corrected["country_code"],
-            "inner",
-        )
-        .filter(F.col("country_name") != F.col("new_name"))
-        .count()
-    )
-    # Simpler count: rows whose code is in the canonical map
     mapped_count = long_df.filter(
         F.col("country_code").isin(list(CANONICAL_NAMES.keys()))
     ).count()
@@ -376,7 +303,7 @@ def normalize_country_names(long_df: DataFrame) -> DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Clean step 2: drop rows missing both GDP and HDI
+# Clean step: drop rows missing prices
 # ---------------------------------------------------------------------------
 
 def drop_missing_price(wide_df: DataFrame) -> DataFrame:
@@ -404,15 +331,7 @@ def drop_missing_email_score(wide_df: DataFrame) -> DataFrame:
 
 def drop_missing_gdp_hdi(wide_df: DataFrame) -> DataFrame:
     """Legacy filter for country-based data — kept for backward compatibility."""
-    if "gdp_growth_pct" not in wide_df.columns and "hdi_value" not in wide_df.columns:
-        return drop_missing_price(wide_df)
-    before = wide_df.count()
-    cleaned = wide_df.filter(
-        F.col("gdp_growth_pct").isNotNull() | F.col("hdi_value").isNotNull()
-    )
-    after = cleaned.count()
-    print(f"  Dropped {before - after:,} rows missing both GDP and HDI  ({after:,} remain)")
-    return cleaned
+    return drop_missing_price(wide_df)
 
 
 # ---------------------------------------------------------------------------
@@ -426,22 +345,8 @@ def transform(
 ) -> tuple[DataFrame, DataFrame]:
     """
     Run the full transform + clean pipeline.
-
-    1. Extract sources via extract.py (pandas)
-    2. Convert each to a Spark DataFrame
-    3. Union into one long Spark DF
-    4. Pivot to wide Spark DF (one row per ticker + year)
-    5. Drop rows missing core price metrics
-
-    Args:
-        include_realtime: fetch Finnhub stock data (default True).
-        include_legacy:   kept for CLI compatibility; ignored by active extractor.
-        include_api:      kept for CLI compatibility; ignored by active extractor.
-
-    Returns:
-        (long_df, wide_df) — both are Spark DataFrames, wide_df is cleaned.
     """
-    from etl.extract import extract_all  # imported here to keep Spark startup lazy
+    from etl.extract import extract_all
 
     spark = get_spark()
 
@@ -458,11 +363,7 @@ def transform(
     print("\n=== Union sources ===")
     long_df = union_sources(spark_dfs)
 
-    if include_legacy:
-        print("\n=== Normalise country names ===")
-        long_df = normalize_country_names(long_df)
-
-    print("\n=== Pivot wide (merge on ticker + year) ===")
+    print("\n=== Pivot wide (merge on ticker + timeframe + time_index) ===")
     wide_df = pivot_wide(long_df)
 
     print("\n=== Clean ===")

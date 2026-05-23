@@ -10,7 +10,8 @@ CREATE TABLE silver.commodity_prices (
     symbol              VARCHAR(40)  NOT NULL,
     commodity_name      VARCHAR(160),
     commodity_category  VARCHAR(80),
-    year                INT          NOT NULL,
+    timeframe           VARCHAR(10)  NOT NULL,
+    time_index          DATE         NOT NULL,
     open_price          FLOAT,
     high_price          FLOAT,
     low_price           FLOAT,
@@ -27,6 +28,6 @@ CREATE TABLE silver.commodity_prices (
     loaded_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_silver_commodity_symbol ON silver.commodity_prices (symbol);
-CREATE INDEX idx_silver_commodity_year   ON silver.commodity_prices (year);
-CREATE INDEX idx_silver_commodity_cat    ON silver.commodity_prices (commodity_category);
+CREATE INDEX idx_silver_commodity_symbol   ON silver.commodity_prices (symbol);
+CREATE INDEX idx_silver_commodity_tf_index ON silver.commodity_prices (timeframe, time_index);
+CREATE INDEX idx_silver_commodity_cat      ON silver.commodity_prices (commodity_category);

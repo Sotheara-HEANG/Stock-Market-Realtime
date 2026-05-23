@@ -54,7 +54,8 @@ def add_price_movement(wide_df: DataFrame) -> DataFrame:
             .withColumn("price_trend", F.lit(None).cast("string"))
         )
 
-    w = Window.partitionBy("country_code").orderBy("year")
+    # Partition by both country_code and timeframe, ordered by time_index
+    w = Window.partitionBy("country_code", "timeframe").orderBy("time_index")
     df = wide_df.withColumn("previous_close", F.lag("close_price").over(w))
     df = df.withColumn(
         "price_change",
@@ -112,7 +113,7 @@ def add_volatility(wide_df: DataFrame) -> DataFrame:
 
 def add_category_averages(wide_df: DataFrame) -> DataFrame:
     """Add category-level average close price and count."""
-    needed = {"commodity_category", "year", "close_price"}
+    needed = {"commodity_category", "timeframe", "time_index", "close_price"}
     missing = needed - set(wide_df.columns)
     if missing:
         print(f"  category averages: missing columns {missing}, skipped")
@@ -124,14 +125,14 @@ def add_category_averages(wide_df: DataFrame) -> DataFrame:
 
     agg_df = (
         wide_df
-        .groupBy("commodity_category", "year")
+        .groupBy("commodity_category", "timeframe", "time_index")
         .agg(
             F.round(F.avg("close_price"), 4).alias("category_avg_close"),
             F.count("*").alias("category_count"),
         )
     )
-    df = wide_df.join(agg_df, on=["commodity_category", "year"], how="left")
-    print(f"  category averages: {agg_df.count():,} category/year groups")
+    df = wide_df.join(agg_df, on=["commodity_category", "timeframe", "time_index"], how="left")
+    print(f"  category averages: {agg_df.count():,} category/timeframe/time_index groups")
     return df
 
 
