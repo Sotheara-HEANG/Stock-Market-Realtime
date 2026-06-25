@@ -548,6 +548,33 @@ def _fallback_quote(row: pd.Series) -> dict[str, float]:
     }
 
 
+def _fetch_finnhub_quote(symbol: str) -> dict[str, float] | None:
+    """Call Finnhub /quote endpoint for real-time price. Returns None on failure."""
+    api_key = os.environ.get("FINNHUB_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        resp = requests.get(
+            "https://finnhub.io/api/v1/quote",
+            params={"symbol": symbol, "token": api_key},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        # Finnhub returns c=current, o=open, h=high, l=low, pc=previous close
+        if data.get("c") and data["c"] > 0:
+            return {
+                "live_price": float(data["c"]),
+                "open": float(data.get("o", 0)),
+                "high": float(data.get("h", 0)),
+                "low": float(data.get("l", 0)),
+                "previous_close": float(data.get("pc", 0)),
+            }
+    except Exception:
+        pass
+    return None
+
+
 @st.fragment(run_every="30s")
 def _live_market_stream(latest_df: pd.DataFrame) -> None:
     # Inject dynamic update style inside fragment to trigger animation on update
@@ -608,8 +635,13 @@ def _live_market_stream(latest_df: pd.DataFrame) -> None:
 
     for _, row in latest_df.iterrows():
         symbol = str(row["symbol"]).upper()
-        quote = _fallback_quote(row)
-        source = "Warehouse DWH"
+        # Try Finnhub real-time quote first, fall back to warehouse data
+        quote = _fetch_finnhub_quote(symbol)
+        if quote is not None:
+            source = "Finnhub Live"
+        else:
+            quote = _fallback_quote(row)
+            source = "Warehouse DWH"
 
         live_price = quote["live_price"]
         prev_tick = previous_prices.get(symbol)
